@@ -1,3 +1,5 @@
+from collections import defaultdict
+
 import structlog
 
 from src.extract.contradiction import detect_contradictions, store_facts_with_contradictions
@@ -6,6 +8,8 @@ from src.extract.profile_synthesizer import ProfileUpdateTrigger, synthesize_pro
 from src.extract.session_detector import SessionDetector
 from src.store import buffer_store
 from src.store.cache import release_extract_lock
+
+_STUCK_PROCESSING_MINUTES = 10
 
 logger = structlog.get_logger(__name__)
 
@@ -45,12 +49,17 @@ async def process_group(ctx: dict, group_id: str, tenant_id: str = "default") ->
 
         await buffer_store.mark_consumed([m.id for m in pending])
 
-        try:
-            if await _profile_trigger.should_update(primary_user_id, saved, tenant_id):
-                await synthesize_profile(primary_user_id, saved, tenant_id)
-                logger.info("profile_updated", user_id=primary_user_id)
-        except Exception as e:
-            logger.warning("profile_update_skipped", error=str(e))
+        facts_by_user: dict[str, list] = defaultdict(list)
+        for f in saved:
+            facts_by_user[f.user_id].append(f)
+
+        for uid, user_facts in facts_by_user.items():
+            try:
+                if await _profile_trigger.should_update(uid, user_facts, tenant_id):
+                    await synthesize_profile(uid, user_facts, tenant_id)
+                    logger.info("profile_updated", user_id=uid)
+            except Exception as e:
+                logger.warning("profile_update_skipped", user_id=uid, error=str(e))
 
         logger.info("process_group_done", group_id=group_id, facts_saved=len(saved))
         return {"status": "ok", "facts_saved": len(saved)}
@@ -64,29 +73,31 @@ async def process_group(ctx: dict, group_id: str, tenant_id: str = "default") ->
 
 async def scan_groups(ctx: dict) -> dict:
     """Periodic task: scan all groups with pending messages and trigger extraction."""
-    from src.store.buffer_store import get_active_group_ids
+    from src.store.buffer_store import get_active_group_ids, recover_stuck_processing
     from src.store.cache import acquire_extract_lock
 
-    group_ids = await get_active_group_ids()
+    await recover_stuck_processing(stuck_minutes=_STUCK_PROCESSING_MINUTES)
+
+    groups = await get_active_group_ids()
     triggered = 0
 
-    for group_id in group_ids:
+    for tenant_id, group_id in groups:
         try:
-            should = await _session_detector.should_extract(group_id)
+            should = await _session_detector.should_extract(group_id, tenant_id)
             if not should:
                 continue
 
-            locked = await acquire_extract_lock("default", group_id)
+            locked = await acquire_extract_lock(tenant_id, group_id)
             if not locked:
                 logger.info("extract_lock_busy", group_id=group_id)
                 continue
 
-            await process_group(ctx, group_id)
+            await ctx["redis"].enqueue_job("process_group", group_id, tenant_id)
             triggered += 1
         except Exception as e:
             logger.error("scan_group_error", group_id=group_id, error=str(e))
 
-    return {"triggered": triggered, "scanned": len(group_ids)}
+    return {"triggered": triggered, "scanned": len(groups)}
 
 
 async def decay_sweep(ctx: dict) -> dict:

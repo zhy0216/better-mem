@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 import asyncpg
@@ -44,13 +44,14 @@ async def insert_batch(
     user_id: str,
     tenant_id: str = "default",
     group_id: str | None = None,
+    conn=None,
 ) -> list[Fact]:
-    pool = get_pool()
-    saved = []
-    async with pool.acquire() as conn:
+    async def _do_insert(c) -> list[Fact]:
+        saved = []
         for fact in facts:
-            occurred_at = fact.occurred_at or datetime.utcnow()
-            row = await conn.fetchrow(
+            occurred_at = fact.occurred_at or datetime.now(tz=timezone.utc)
+            effective_user_id = fact.speaker_id or user_id
+            row = await c.fetchrow(
                 """
                 INSERT INTO facts (
                     tenant_id, user_id, group_id, content, fact_type,
@@ -60,7 +61,7 @@ async def insert_batch(
                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
                 RETURNING *
                 """,
-                tenant_id, user_id, group_id, fact.content, fact.fact_type,
+                tenant_id, effective_user_id, group_id, fact.content, fact.fact_type,
                 occurred_at, fact.valid_from, fact.valid_until,
                 fact.importance, fact.decay_rate, fact.source_type,
                 fact.source_id,
@@ -70,7 +71,13 @@ async def insert_batch(
                 f"[{','.join(str(v) for v in fact.embedding)}]" if fact.embedding else None,
             )
             saved.append(_row_to_fact(row))
-    return saved
+        return saved
+
+    if conn is not None:
+        return await _do_insert(conn)
+    pool = get_pool()
+    async with pool.acquire() as c:
+        return await _do_insert(c)
 
 
 async def get_by_id(fact_id: UUID, tenant_id: str = "default") -> Fact | None:
@@ -101,7 +108,7 @@ async def update(fact_id: UUID, update: FactUpdate, tenant_id: str = "default") 
     if not fields:
         return await get_by_id(fact_id, tenant_id)
     fields.append(f"updated_at = ${idx}")
-    params.append(datetime.utcnow())
+    params.append(datetime.now(tz=timezone.utc))
     idx += 1
     params.extend([fact_id, tenant_id])
     sql = f"UPDATE facts SET {', '.join(fields)} WHERE id = ${idx} AND tenant_id = ${idx+1} RETURNING *"
@@ -120,10 +127,9 @@ async def soft_delete(fact_id: UUID, tenant_id: str = "default") -> bool:
     return result == "UPDATE 1"
 
 
-async def mark_superseded(old_fact_id: UUID, superseded_by: UUID) -> None:
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute(
+async def mark_superseded(old_fact_id: UUID, superseded_by: UUID, conn=None) -> None:
+    async def _do(c) -> None:
+        await c.execute(
             """
             UPDATE facts
             SET status = 'superseded', superseded_by = $2, updated_at = now()
@@ -131,6 +137,21 @@ async def mark_superseded(old_fact_id: UUID, superseded_by: UUID) -> None:
             """,
             old_fact_id, superseded_by,
         )
+        await c.execute(
+            """
+            UPDATE facts
+            SET supersedes = $2, updated_at = now()
+            WHERE id = $1
+            """,
+            superseded_by, old_fact_id,
+        )
+
+    if conn is not None:
+        await _do(conn)
+        return
+    pool = get_pool()
+    async with pool.acquire() as c:
+        await _do(c)
 
 
 async def vector_search(
@@ -146,7 +167,8 @@ async def vector_search(
     time_end = f.time_range.get("end") if f.time_range else None
     vec_str = f"[{','.join(str(v) for v in embedding)}]"
     sql = """
-        SELECT id, content, fact_type, occurred_at, importance, metadata, tags,
+        SELECT id, content, fact_type, occurred_at, importance, decay_rate, access_count,
+               metadata, tags,
                1 - (embedding <=> $1::vector) AS score
         FROM facts
         WHERE tenant_id = $2
@@ -169,6 +191,7 @@ async def vector_search(
         ScoredFact(
             id=r["id"], content=r["content"], fact_type=r["fact_type"],
             occurred_at=r["occurred_at"], importance=r["importance"],
+            decay_rate=float(r["decay_rate"]), access_count=int(r["access_count"]),
             metadata=dict(r["metadata"]) if r["metadata"] else {},
             tags=list(r["tags"]) if r["tags"] else [],
             score=float(r["score"]), source="vector",
@@ -189,13 +212,24 @@ async def keyword_search(
     time_start = f.time_range.get("start") if f.time_range else None
     time_end = f.time_range.get("end") if f.time_range else None
     sql = """
-        SELECT id, content, fact_type, occurred_at, importance, metadata, tags,
-               ts_rank(tsv, plainto_tsquery('simple', $1)) AS score
+        SELECT id, content, fact_type, occurred_at, importance, decay_rate, access_count,
+               metadata, tags,
+               GREATEST(
+                   similarity(content, $1),
+                   CASE WHEN tsv @@ plainto_tsquery('simple', $1)
+                        THEN ts_rank(tsv, plainto_tsquery('simple', $1))
+                        ELSE 0
+                   END
+               ) AS score
         FROM facts
         WHERE tenant_id = $2
           AND user_id = $3
           AND status = ANY($4)
-          AND tsv @@ plainto_tsquery('simple', $1)
+          AND (
+              content ILIKE '%' || $1 || '%'
+              OR similarity(content, $1) > 0.1
+              OR tsv @@ plainto_tsquery('simple', $1)
+          )
           AND ($5::text IS NULL OR group_id = $5)
           AND ($6::timestamptz IS NULL OR occurred_at >= $6)
           AND ($7::timestamptz IS NULL OR occurred_at <= $7)
@@ -212,6 +246,7 @@ async def keyword_search(
         ScoredFact(
             id=r["id"], content=r["content"], fact_type=r["fact_type"],
             occurred_at=r["occurred_at"], importance=r["importance"],
+            decay_rate=float(r["decay_rate"]), access_count=int(r["access_count"]),
             metadata=dict(r["metadata"]) if r["metadata"] else {},
             tags=list(r["tags"]) if r["tags"] else [],
             score=float(r["score"]), source="keyword",

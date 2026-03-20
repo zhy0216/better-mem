@@ -18,6 +18,7 @@ class FactCreate(BaseModel):
     tags: list[str] = Field(default_factory=list)
     metadata: dict = Field(default_factory=dict)
     embedding: list[float] | None = None
+    speaker_id: str | None = None
 
 
 class FactUpdate(BaseModel):
@@ -61,6 +62,8 @@ class ScoredFact(BaseModel):
     fact_type: str
     occurred_at: datetime
     importance: float
+    decay_rate: float = 0.01
+    access_count: int = 0
     metadata: dict
     tags: list[str]
     score: float

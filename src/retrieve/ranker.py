@@ -10,7 +10,7 @@ def reciprocal_rank_fusion(
     keyword_results: list[ScoredFact],
     k: int = 60,
 ) -> list[ScoredFact]:
-    """Merge two ranked lists using Reciprocal Rank Fusion."""
+    """Merge two ranked lists using Reciprocal Rank Fusion, then re-rank by relevance."""
     scores: dict[UUID, float] = {}
     fact_map: dict[UUID, ScoredFact] = {}
 
@@ -31,6 +31,8 @@ def reciprocal_rank_fusion(
                     fact_type=existing.fact_type,
                     occurred_at=existing.occurred_at,
                     importance=existing.importance,
+                    decay_rate=existing.decay_rate,
+                    access_count=existing.access_count,
                     metadata=existing.metadata,
                     tags=existing.tags,
                     score=scores[fact.id],
@@ -38,9 +40,17 @@ def reciprocal_rank_fusion(
                 )
                 fact_map[fact.id] = combined
 
+    now = datetime.now(tz=timezone.utc)
     merged = []
     for fid, rrf_score in sorted(scores.items(), key=lambda x: x[1], reverse=True):
         fact = fact_map[fid]
+        relevance = compute_relevance_score(
+            importance=fact.importance,
+            decay_rate=fact.decay_rate,
+            occurred_at=fact.occurred_at,
+            access_count=fact.access_count,
+            now=now,
+        )
         merged.append(
             ScoredFact(
                 id=fact.id,
@@ -48,12 +58,15 @@ def reciprocal_rank_fusion(
                 fact_type=fact.fact_type,
                 occurred_at=fact.occurred_at,
                 importance=fact.importance,
+                decay_rate=fact.decay_rate,
+                access_count=fact.access_count,
                 metadata=fact.metadata,
                 tags=fact.tags,
-                score=rrf_score,
+                score=rrf_score * relevance,
                 source=fact.source,
             )
         )
+    merged.sort(key=lambda f: f.score, reverse=True)
     return merged
 
 

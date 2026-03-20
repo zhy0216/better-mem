@@ -10,9 +10,11 @@ Rules:
 7. For plans/events with a future time scope, include valid_from and valid_until
 8. Filter out greetings, acknowledgments, and low-information content
 9. For each fact, add relevant tags (2-5 tags)
+10. Set speaker_id to the ID of the participant whose information the fact is primarily about.
+    Use the participant list below to look up IDs by name. If uncertain, use null.
 
 Conversation timestamp: {timestamp}
-Participants: {participants}
+Participants (name -> id): {participants}
 
 Conversation:
 {conversation}
@@ -26,7 +28,8 @@ Return a JSON object:
             "importance": 0.7,
             "valid_from": "2024-04-01",
             "valid_until": "2024-04-30",
-            "tags": ["travel", "tokyo", "plan"]
+            "tags": ["travel", "tokyo", "plan"],
+            "speaker_id": "user_001"
         }}
     ]
 }}"""

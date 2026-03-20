@@ -24,16 +24,25 @@ def _format_messages(messages: list[MessageBuffer]) -> str:
     return "\n".join(lines)
 
 
-def _extract_participants(messages: list[MessageBuffer]) -> list[str]:
-    seen: set[str] = set()
-    names = []
+_DECAY_RATES: dict[str, float] = {
+    "plan": 0.05,
+    "observation": 0.02,
+    "declaration": 0.005,
+    "preference": 0.005,
+    "relation": 0.003,
+}
+
+
+def _extract_participant_map(messages: list[MessageBuffer]) -> dict[str, str]:
+    """Return {speaker_name: speaker_id} for all participants."""
+    result: dict[str, str] = {}
     for m in messages:
         content = m.content
-        name = content.get("speaker_name") or content.get("speaker_id")
-        if name and name not in seen:
-            seen.add(name)
-            names.append(name)
-    return names
+        name = content.get("speaker_name")
+        sid = content.get("speaker_id")
+        if name and sid and name not in result:
+            result[name] = sid
+    return result
 
 
 async def extract_facts(
@@ -45,11 +54,12 @@ async def extract_facts(
         timestamp = datetime.now(tz=timezone.utc).isoformat()
 
     conversation = _format_messages(messages)
-    participants = _extract_participants(messages)
+    participant_map = _extract_participant_map(messages)
+    participants_str = ", ".join(f"{name} -> {sid}" for name, sid in participant_map.items())
 
     prompt = FACT_EXTRACTION_PROMPT.format(
         timestamp=timestamp,
-        participants=", ".join(participants),
+        participants=participants_str or user_id,
         conversation=conversation,
     )
 
@@ -68,14 +78,17 @@ async def extract_facts(
 
     fact_creates: list[FactCreate] = []
     for f in raw_facts:
+        fact_type = f.get("fact_type", "observation")
         fc = FactCreate(
             content=f["content"],
-            fact_type=f.get("fact_type", "observation"),
+            fact_type=fact_type,
             importance=float(f.get("importance", 0.5)),
+            decay_rate=_DECAY_RATES.get(fact_type, 0.01),
             valid_from=f.get("valid_from"),
             valid_until=f.get("valid_until"),
             tags=f.get("tags", []),
             source_type="conversation",
+            speaker_id=f.get("speaker_id") or None,
         )
         fact_creates.append(fc)
 

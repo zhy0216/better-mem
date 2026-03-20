@@ -87,14 +87,36 @@ async def mark_consumed(ids: list[UUID]) -> None:
         )
 
 
-async def get_active_group_ids(tenant_id: str = "default") -> list[str]:
+async def get_active_group_ids() -> list[tuple[str, str]]:
+    """Return (tenant_id, group_id) for all groups with pending messages."""
     pool = get_pool()
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            SELECT DISTINCT group_id FROM message_buffer
-            WHERE tenant_id = $1 AND status = 'pending'
-            """,
-            tenant_id,
+            SELECT DISTINCT tenant_id, group_id FROM message_buffer
+            WHERE status = 'pending'
+            """
         )
-    return [r["group_id"] for r in rows]
+    return [(r["tenant_id"], r["group_id"]) for r in rows]
+
+
+async def recover_stuck_processing(stuck_minutes: int = 10) -> int:
+    """Reset messages stuck in 'processing' state back to 'pending'."""
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        result = await conn.execute(
+            """
+            UPDATE message_buffer
+            SET status = 'pending'
+            WHERE status = 'processing'
+              AND created_at < now() - ($1 * interval '1 minute')
+            """,
+            stuck_minutes,
+        )
+    count = int(result.split()[-1]) if result else 0
+    if count:
+        import structlog
+        structlog.get_logger(__name__).warning(
+            "recovered_stuck_messages", count=count
+        )
+    return count
