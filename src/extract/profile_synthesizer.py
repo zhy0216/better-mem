@@ -1,0 +1,90 @@
+from datetime import datetime, timedelta, timezone
+
+import structlog
+
+from src.config import settings
+from src.extract.prompts import PROFILE_SYNTHESIS_PROMPT
+from src.models.fact import Fact
+from src.models.profile import Profile, ProfileData
+from src.services import llm as llm_service
+from src.store import fact_store, profile_store
+
+logger = structlog.get_logger(__name__)
+
+
+class ProfileUpdateTrigger:
+    def __init__(self) -> None:
+        self.fact_count_threshold = settings.PROFILE_FACT_THRESHOLD
+        self.time_threshold = timedelta(hours=settings.PROFILE_TIME_THRESHOLD_HOURS)
+        self.force_on_declaration = settings.PROFILE_FORCE_ON_DECLARATION
+
+    async def should_update(
+        self,
+        user_id: str,
+        new_facts: list[Fact],
+        tenant_id: str = "default",
+    ) -> bool:
+        if self.force_on_declaration:
+            if any(f.fact_type == "declaration" for f in new_facts):
+                return True
+
+        profile = await profile_store.get(user_id, tenant_id)
+        if profile is None:
+            return True
+
+        facts_since = await fact_store.count_since(user_id, profile.updated_at, tenant_id)
+        if facts_since >= self.fact_count_threshold:
+            return True
+
+        updated_at = profile.updated_at
+        if updated_at.tzinfo is None:
+            updated_at = updated_at.replace(tzinfo=timezone.utc)
+        if datetime.now(tz=timezone.utc) - updated_at > self.time_threshold:
+            return True
+
+        return False
+
+
+async def synthesize_profile(
+    user_id: str,
+    new_facts: list[Fact],
+    tenant_id: str = "default",
+    scope: str = "global",
+    group_id: str | None = None,
+) -> Profile:
+    existing = await profile_store.get(user_id, tenant_id, scope, group_id)
+    existing_profile_str = existing.profile_data.model_dump_json() if existing else "{}"
+
+    new_facts_text = "\n".join(f"[{f.id}] ({f.fact_type}) {f.content}" for f in new_facts)
+
+    prompt = PROFILE_SYNTHESIS_PROMPT.format(
+        existing_profile=existing_profile_str,
+        new_facts=new_facts_text,
+    )
+
+    try:
+        data = await llm_service.complete_json(
+            system_prompt=prompt,
+            model=settings.EXTRACT_MODEL,
+        )
+        profile_data = ProfileData(
+            skills=data.get("skills", []),
+            personality=data.get("personality", []),
+            preferences=data.get("preferences", []),
+            goals=data.get("goals", []),
+            relations=data.get("relations", []),
+            summary=data.get("summary", ""),
+        )
+    except Exception as e:
+        logger.error("profile_synthesis_failed", error=str(e))
+        profile_data = existing.profile_data if existing else ProfileData()
+
+    last_fact_id = new_facts[-1].id if new_facts else None
+    return await profile_store.upsert(
+        user_id=user_id,
+        profile_data=profile_data,
+        tenant_id=tenant_id,
+        scope=scope,
+        group_id=group_id,
+        last_fact_id=last_fact_id,
+    )
