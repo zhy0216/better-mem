@@ -21,13 +21,13 @@ def get_model() -> SentenceTransformer:
 
 async def embed(text: str) -> list[float]:
     model = get_model()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     vec = await loop.run_in_executor(None, model.encode, text)
     return vec.tolist()
 
 
 async def embed_batch(texts: list[str]) -> list[list[float]]:
     model = get_model()
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     vecs = await loop.run_in_executor(None, model.encode, texts)
     return [v.tolist() for v in vecs]

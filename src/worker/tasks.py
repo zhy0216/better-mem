@@ -23,10 +23,12 @@ async def process_group(ctx: dict, group_id: str, tenant_id: str = "default") ->
     await buffer_store.mark_processing([m.id for m in pending])
 
     try:
+        user_id = pending[0].user_id
         saved = await memorize_service.process_buffered_messages(
             buffers=pending,
             tenant_id=tenant_id,
             group_id=group_id,
+            user_id=user_id,
         )
 
         await buffer_store.mark_consumed([m.id for m in pending])

@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import litellm
@@ -43,5 +44,7 @@ async def complete_json(
         except Exception as e:
             logger.warning("llm_completion_error", attempt=attempt, error=str(e))
             last_exc = e
+        if attempt < _retries:
+            await asyncio.sleep(min(2 ** (attempt - 1), 8))
 
     raise RuntimeError(f"LLM call failed after {_retries} attempts: {last_exc}")

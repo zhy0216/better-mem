@@ -87,6 +87,7 @@ async def synthesize_profile(
         scope=scope,
         group_id=group_id,
         last_fact_id=last_fact_id,
+        fact_count=len(new_facts),
     )
     await cache.invalidate_profile_cache(tenant_id, user_id, scope, group_id)
     return updated

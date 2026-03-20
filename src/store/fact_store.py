@@ -57,7 +57,7 @@ async def insert_batch(
                     occurred_at, valid_from, valid_until,
                     importance, decay_rate, source_type, source_id, source_meta,
                     tags, metadata, embedding
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::vector)
                 RETURNING *
                 """,
                 tenant_id, effective_user_id, group_id, fact.content, fact.fact_type,
@@ -76,7 +76,8 @@ async def insert_batch(
         return await _do_insert(conn)
     pool = get_pool()
     async with pool.acquire() as c:
-        return await _do_insert(c)
+        async with c.transaction():
+            return await _do_insert(c)
 
 
 async def get_by_id(fact_id: UUID, tenant_id: str = "default") -> Fact | None:
@@ -177,14 +178,15 @@ async def vector_search(
           AND ($6::timestamptz IS NULL OR occurred_at >= $6)
           AND ($7::timestamptz IS NULL OR occurred_at <= $7)
           AND ($8::text[] IS NULL OR fact_type = ANY($8))
+          AND ($9::text[] IS NULL OR tags @> $9)
         ORDER BY embedding <=> $1::vector
-        LIMIT $9
+        LIMIT $10
     """
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             sql, vec_str, tenant_id, user_id,
             f.status or ["active"],
-            f.group_id, time_start, time_end, f.fact_types, top_k,
+            f.group_id, time_start, time_end, f.fact_types, f.tags, top_k,
         )
     return [
         ScoredFact(
@@ -232,14 +234,16 @@ async def keyword_search(
           AND ($5::text IS NULL OR group_id = $5)
           AND ($6::timestamptz IS NULL OR occurred_at >= $6)
           AND ($7::timestamptz IS NULL OR occurred_at <= $7)
+          AND ($8::text[] IS NULL OR fact_type = ANY($8))
+          AND ($9::text[] IS NULL OR tags @> $9)
         ORDER BY score DESC
-        LIMIT $8
+        LIMIT $10
     """
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             sql, query, tenant_id, user_id,
             f.status or ["active"],
-            f.group_id, time_start, time_end, top_k,
+            f.group_id, time_start, time_end, f.fact_types, f.tags, top_k,
         )
     return [
         ScoredFact(

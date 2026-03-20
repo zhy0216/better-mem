@@ -21,15 +21,21 @@ async def memorize(req: MemorizeRequest) -> MemorizeAsyncResponse | MemorizeSync
             group_id=req.group_id,
             tenant_id=req.tenant_id,
             batch_id=batch_id,
+            user_id=req.user_id,
         )
         await buffer_store.mark_processing([b.id for b in buffers])
 
-        saved = await memorize_service.process_buffered_messages(
-            buffers=buffers,
-            tenant_id=req.tenant_id,
-            group_id=req.group_id,
-        )
-        await buffer_store.mark_consumed([b.id for b in buffers])
+        try:
+            saved = await memorize_service.process_buffered_messages(
+                buffers=buffers,
+                tenant_id=req.tenant_id,
+                group_id=req.group_id,
+                user_id=req.user_id,
+            )
+            await buffer_store.mark_consumed([b.id for b in buffers])
+        except Exception:
+            await buffer_store.mark_pending([b.id for b in buffers])
+            raise
 
         return MemorizeSyncResponse(
             status="completed",
@@ -51,6 +57,7 @@ async def memorize(req: MemorizeRequest) -> MemorizeAsyncResponse | MemorizeSync
         group_id=req.group_id,
         tenant_id=req.tenant_id,
         batch_id=batch_id,
+        user_id=req.user_id,
     )
 
     logger.info(

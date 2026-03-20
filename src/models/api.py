@@ -10,6 +10,7 @@ from src.models.fact import AssembledContext, ScoredFact, SearchFilters
 class MemorizeRequest(BaseModel):
     tenant_id: str = "default"
     group_id: str
+    user_id: str = "unknown"
     messages: list[Message]
     source_type: str = "conversation"
     extract_mode: str = "async"

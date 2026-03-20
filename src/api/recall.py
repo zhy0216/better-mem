@@ -56,7 +56,8 @@ async def recall(req: RecallRequest) -> RecallAssembledResponse | RecallRawRespo
         profile_snippet = None
         if profile:
             relevant_traits = [
-                p["trait"] for p in profile.profile_data.personality[:3]
+                p.get("trait", "") for p in profile.profile_data.personality[:3]
+                if p.get("trait")
             ]
             profile_snippet = ProfileSnippet(
                 summary=profile.profile_data.summary,

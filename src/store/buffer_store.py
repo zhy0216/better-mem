@@ -88,6 +88,15 @@ async def mark_consumed(ids: list[UUID]) -> None:
         )
 
 
+async def mark_pending(ids: list[UUID]) -> None:
+    pool = get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE message_buffer SET status = 'pending' WHERE id = ANY($1)",
+            ids,
+        )
+
+
 async def get_active_group_ids() -> list[tuple[str, str]]:
     """Return (tenant_id, group_id) for all groups with pending messages."""
     pool = get_pool()
