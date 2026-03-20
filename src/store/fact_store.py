@@ -4,8 +4,7 @@ from uuid import UUID
 import asyncpg
 import structlog
 
-from src.models.api import SearchFilters
-from src.models.fact import Fact, FactCreate, FactUpdate, ScoredFact
+from src.models.fact import Fact, FactCreate, FactUpdate, ScoredFact, SearchFilters
 from src.store.database import get_pool
 
 logger = structlog.get_logger(__name__)

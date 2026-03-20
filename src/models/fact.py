@@ -4,6 +4,21 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 
+class SearchFilters(BaseModel):
+    group_id: str | None = None
+    fact_types: list[str] | None = None
+    time_range: dict | None = None
+    tags: list[str] | None = None
+    status: list[str] = Field(default_factory=lambda: ["active"])
+
+
+class AssembledContext(BaseModel):
+    context: str
+    selected_fact_ids: list[str]
+    confidence: float = 1.0
+    information_gaps: list[str] = Field(default_factory=list)
+
+
 class FactCreate(BaseModel):
     content: str
     fact_type: str = "observation"

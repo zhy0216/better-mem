@@ -30,21 +30,22 @@ def _row_to_buffer(row: asyncpg.Record) -> MessageBuffer:
 async def insert_messages(
     messages: list[Message],
     group_id: str,
-    user_id: str,
     tenant_id: str = "default",
     batch_id: UUID | None = None,
+    user_id: str = "unknown",
 ) -> list[MessageBuffer]:
     pool = get_pool()
     saved = []
     async with pool.acquire() as conn:
         for msg in messages:
+            effective_user_id = msg.speaker_id or user_id
             row = await conn.fetchrow(
                 """
                 INSERT INTO message_buffer (tenant_id, group_id, user_id, content, batch_id)
                 VALUES ($1, $2, $3, $4::jsonb, $5)
                 RETURNING *
                 """,
-                tenant_id, group_id, user_id,
+                tenant_id, group_id, effective_user_id,
                 json.dumps(msg.model_dump(mode="json")),
                 batch_id,
             )

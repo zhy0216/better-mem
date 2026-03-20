@@ -26,10 +26,7 @@ async def test_memorize_async_mode(client):
     fake_buffer = AsyncMock()
     fake_buffer.id = uuid4()
 
-    with (
-        patch("src.api.memorize.buffer_store.insert_messages", AsyncMock(return_value=[fake_buffer])),
-        patch("src.api.memorize.cache.push_message_buffer", AsyncMock()),
-    ):
+    with patch("src.api.memorize.buffer_store.insert_messages", AsyncMock(return_value=[fake_buffer])):
         resp = await client.post("/v1/memorize", json=payload)
 
     assert resp.status_code == 200
@@ -90,9 +87,7 @@ async def test_memorize_sync_mode(client):
         patch("src.api.memorize.buffer_store.insert_messages", AsyncMock(return_value=[fake_buffer])),
         patch("src.api.memorize.buffer_store.mark_processing", AsyncMock()),
         patch("src.api.memorize.buffer_store.mark_consumed", AsyncMock()),
-        patch("src.api.memorize.extract_facts", AsyncMock(return_value=[])),
-        patch("src.api.memorize.detect_contradictions", AsyncMock(return_value=[])),
-        patch("src.api.memorize.store_facts_with_contradictions", AsyncMock(return_value=[fake_fact])),
+        patch("src.api.memorize.memorize_service.process_buffered_messages", AsyncMock(return_value=[fake_fact])),
     ):
         resp = await client.post("/v1/memorize", json=payload)
 

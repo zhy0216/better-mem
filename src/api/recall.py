@@ -18,7 +18,8 @@ logger = structlog.get_logger(__name__)
 async def recall(req: RecallRequest) -> RecallAssembledResponse | RecallRawResponse:
     filters = req.filters
     cache_hash = cache.make_recall_hash(
-        req.tenant_id, req.user_id, req.query, filters.model_dump()
+        req.tenant_id, req.user_id, req.query, filters.model_dump(),
+        req.top_k, req.assemble, req.include_profile,
     )
     cached = await cache.get_recall_cache(cache_hash)
     if cached:

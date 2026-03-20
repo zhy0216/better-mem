@@ -14,7 +14,7 @@ async def get_profile(
     scope: str = Query(default="global"),
     group_id: str | None = Query(default=None),
 ) -> dict:
-    cached = await cache.get_profile_cache(tenant_id, user_id)
+    cached = await cache.get_profile_cache(tenant_id, user_id, scope, group_id)
     if cached:
         return cached
 
@@ -30,5 +30,5 @@ async def get_profile(
         "profile_data": profile.profile_data.model_dump(),
         "updated_at": profile.updated_at.isoformat(),
     }
-    await cache.set_profile_cache(tenant_id, user_id, result)
+    await cache.set_profile_cache(tenant_id, user_id, result, scope, group_id)
     return result

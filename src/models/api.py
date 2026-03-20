@@ -4,7 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from src.models.message import Message
-from src.models.fact import ScoredFact
+from src.models.fact import AssembledContext, ScoredFact, SearchFilters
 
 
 class MemorizeRequest(BaseModel):
@@ -24,14 +24,6 @@ class MemorizeAsyncResponse(BaseModel):
 class MemorizeSyncResponse(BaseModel):
     status: str = "completed"
     facts: list[dict]
-
-
-class SearchFilters(BaseModel):
-    group_id: str | None = None
-    fact_types: list[str] | None = None
-    time_range: dict | None = None
-    tags: list[str] | None = None
-    status: list[str] = Field(default_factory=lambda: ["active"])
 
 
 class RecallRequest(BaseModel):
@@ -61,13 +53,6 @@ class RecallRawResponse(BaseModel):
     facts: list[dict]
     total_candidates: int
     search_time_ms: float
-
-
-class AssembledContext(BaseModel):
-    context: str
-    selected_fact_ids: list[str]
-    confidence: float = 1.0
-    information_gaps: list[str] = Field(default_factory=list)
 
 
 class FactListRequest(BaseModel):

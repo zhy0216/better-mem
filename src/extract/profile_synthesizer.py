@@ -7,7 +7,7 @@ from src.extract.prompts import PROFILE_SYNTHESIS_PROMPT
 from src.models.fact import Fact
 from src.models.profile import Profile, ProfileData
 from src.services import llm as llm_service
-from src.store import fact_store, profile_store
+from src.store import cache, fact_store, profile_store
 
 logger = structlog.get_logger(__name__)
 
@@ -80,7 +80,7 @@ async def synthesize_profile(
         profile_data = existing.profile_data if existing else ProfileData()
 
     last_fact_id = new_facts[-1].id if new_facts else None
-    return await profile_store.upsert(
+    updated = await profile_store.upsert(
         user_id=user_id,
         profile_data=profile_data,
         tenant_id=tenant_id,
@@ -88,3 +88,5 @@ async def synthesize_profile(
         group_id=group_id,
         last_fact_id=last_fact_id,
     )
+    await cache.invalidate_profile_cache(tenant_id, user_id, scope, group_id)
+    return updated

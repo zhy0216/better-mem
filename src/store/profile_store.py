@@ -58,22 +58,38 @@ async def upsert(
 ) -> Profile:
     import json
     pool = get_pool()
+    pd_json = json.dumps(profile_data.model_dump())
     async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            """
-            INSERT INTO profiles (tenant_id, user_id, scope, group_id, profile_data, last_fact_id)
-            VALUES ($1, $2, $3, $4, $5::jsonb, $6)
-            ON CONFLICT (tenant_id, user_id, scope, group_id)
-            DO UPDATE SET
-                profile_data = EXCLUDED.profile_data,
-                version = profiles.version + 1,
-                fact_count = profiles.fact_count + 1,
-                last_fact_id = EXCLUDED.last_fact_id,
-                updated_at = now()
-            RETURNING *
-            """,
-            tenant_id, user_id, scope, group_id,
-            json.dumps(profile_data.model_dump()),
-            last_fact_id,
-        )
+        if group_id is None:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO profiles (tenant_id, user_id, scope, group_id, profile_data, last_fact_id)
+                VALUES ($1, $2, $3, NULL, $4::jsonb, $5)
+                ON CONFLICT (tenant_id, user_id, scope) WHERE group_id IS NULL
+                DO UPDATE SET
+                    profile_data = EXCLUDED.profile_data,
+                    version = profiles.version + 1,
+                    fact_count = profiles.fact_count + 1,
+                    last_fact_id = EXCLUDED.last_fact_id,
+                    updated_at = now()
+                RETURNING *
+                """,
+                tenant_id, user_id, scope, pd_json, last_fact_id,
+            )
+        else:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO profiles (tenant_id, user_id, scope, group_id, profile_data, last_fact_id)
+                VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+                ON CONFLICT (tenant_id, user_id, scope, group_id) WHERE group_id IS NOT NULL
+                DO UPDATE SET
+                    profile_data = EXCLUDED.profile_data,
+                    version = profiles.version + 1,
+                    fact_count = profiles.fact_count + 1,
+                    last_fact_id = EXCLUDED.last_fact_id,
+                    updated_at = now()
+                RETURNING *
+                """,
+                tenant_id, user_id, scope, group_id, pd_json, last_fact_id,
+            )
     return _row_to_profile(row)

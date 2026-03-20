@@ -32,29 +32,40 @@ def get_redis() -> aioredis.Redis:
     return _redis
 
 
-async def get_profile_cache(tenant_id: str, user_id: str) -> dict | None:
+def _profile_cache_key(tenant_id: str, user_id: str, scope: str, group_id: str | None) -> str:
+    gid = group_id or "__none__"
+    return f"cache:profile:{tenant_id}:{user_id}:{scope}:{gid}"
+
+
+async def get_profile_cache(
+    tenant_id: str, user_id: str, scope: str = "global", group_id: str | None = None
+) -> dict | None:
     try:
         r = get_redis()
-        key = f"cache:profile:{tenant_id}:{user_id}"
+        key = _profile_cache_key(tenant_id, user_id, scope, group_id)
         data = await r.get(key)
         return json.loads(data) if data else None
     except Exception:
         return None
 
 
-async def set_profile_cache(tenant_id: str, user_id: str, data: dict, ttl: int = 300) -> None:
+async def set_profile_cache(
+    tenant_id: str, user_id: str, data: dict, scope: str = "global", group_id: str | None = None, ttl: int = 300
+) -> None:
     try:
         r = get_redis()
-        key = f"cache:profile:{tenant_id}:{user_id}"
+        key = _profile_cache_key(tenant_id, user_id, scope, group_id)
         await r.set(key, json.dumps(data), ex=ttl)
     except Exception:
         pass
 
 
-async def invalidate_profile_cache(tenant_id: str, user_id: str) -> None:
+async def invalidate_profile_cache(
+    tenant_id: str, user_id: str, scope: str = "global", group_id: str | None = None
+) -> None:
     try:
         r = get_redis()
-        key = f"cache:profile:{tenant_id}:{user_id}"
+        key = _profile_cache_key(tenant_id, user_id, scope, group_id)
         await r.delete(key)
     except Exception:
         pass
@@ -79,8 +90,27 @@ async def set_recall_cache(query_hash: str, data: dict, ttl: int = 120) -> None:
         pass
 
 
-def make_recall_hash(tenant_id: str, user_id: str, query: str, filters: dict) -> str:
-    raw = json.dumps({"tenant_id": tenant_id, "user_id": user_id, "query": query, "filters": filters}, sort_keys=True)
+def make_recall_hash(
+    tenant_id: str,
+    user_id: str,
+    query: str,
+    filters: dict,
+    top_k: int,
+    assemble: bool,
+    include_profile: bool,
+) -> str:
+    raw = json.dumps(
+        {
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "query": query,
+            "filters": filters,
+            "top_k": top_k,
+            "assemble": assemble,
+            "include_profile": include_profile,
+        },
+        sort_keys=True,
+    )
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -101,12 +131,3 @@ async def release_extract_lock(tenant_id: str, group_id: str) -> None:
         await r.delete(key)
     except Exception:
         pass
-
-
-async def push_message_buffer(tenant_id: str, group_id: str, message: dict) -> None:
-    try:
-        r = get_redis()
-        key = f"buffer:{tenant_id}:{group_id}"
-        await r.rpush(key, json.dumps(message))
-    except Exception as e:
-        logger.warning("redis_buffer_push_failed", error=str(e))

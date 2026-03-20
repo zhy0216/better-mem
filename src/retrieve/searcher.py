@@ -3,8 +3,7 @@ import time
 
 import structlog
 
-from src.models.api import SearchFilters
-from src.models.fact import ScoredFact
+from src.models.fact import ScoredFact, SearchFilters
 from src.retrieve.ranker import reciprocal_rank_fusion
 from src.services import embedding as embedding_service
 from src.store import fact_store

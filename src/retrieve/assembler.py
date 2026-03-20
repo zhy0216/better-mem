@@ -1,8 +1,7 @@
 import structlog
 
 from src.config import settings
-from src.models.api import AssembledContext
-from src.models.fact import ScoredFact
+from src.models.fact import AssembledContext, ScoredFact
 from src.models.profile import Profile
 from src.retrieve.prompts import ASSEMBLE_PROMPT
 from src.services import llm as llm_service
