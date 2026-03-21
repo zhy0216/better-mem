@@ -12,6 +12,8 @@ Rules:
 9. For each fact, add relevant tags (2-5 tags)
 10. Set speaker_id to the ID of the participant whose information the fact is primarily about.
     Use the participant list below to look up IDs by name. If uncertain, use null.
+11. Set occurred_at to the ISO-8601 timestamp of the message that produced this fact.
+    Use the message timestamps from the conversation. If a message has no timestamp, use the conversation timestamp.
 
 Conversation timestamp: {timestamp}
 Participants (name -> id): {participants}
@@ -25,6 +27,7 @@ Return a JSON object:
         {{
             "content": "Zhang San plans to visit Tokyo in April 2024.",
             "fact_type": "plan",
+            "occurred_at": "2024-03-14T10:30:00Z",
             "importance": 0.7,
             "valid_from": "2024-04-01",
             "valid_until": "2024-04-30",

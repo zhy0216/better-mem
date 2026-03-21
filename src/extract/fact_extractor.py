@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from dateutil import parser as dateutil_parser
 
 import structlog
 
@@ -45,6 +46,21 @@ def _extract_participant_map(messages: list[MessageBuffer]) -> dict[str, str]:
     return result
 
 
+def _parse_datetime(value: str | None, fallback: str | None = None) -> datetime | None:
+    """Parse an ISO-8601 string into a timezone-aware datetime, with optional fallback."""
+    for raw in (value, fallback):
+        if not raw:
+            continue
+        try:
+            dt = dateutil_parser.parse(raw)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except Exception:
+            continue
+    return None
+
+
 async def extract_facts(
     messages: list[MessageBuffer],
     user_id: str,
@@ -79,9 +95,11 @@ async def extract_facts(
     fact_creates: list[FactCreate] = []
     for f in raw_facts:
         fact_type = f.get("fact_type", "observation")
+        occurred_at = _parse_datetime(f.get("occurred_at"), fallback=timestamp)
         fc = FactCreate(
             content=f["content"],
             fact_type=fact_type,
+            occurred_at=occurred_at,
             importance=float(f.get("importance", 0.5)),
             decay_rate=_DECAY_RATES.get(fact_type, 0.01),
             valid_from=f.get("valid_from"),

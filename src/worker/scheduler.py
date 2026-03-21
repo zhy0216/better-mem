@@ -1,6 +1,4 @@
-from datetime import timedelta
-
-from arq.connections import RedisSettings
+from arq.cron import cron
 
 from src.config import settings
 from src.worker.tasks import decay_sweep, scan_groups
@@ -21,15 +19,16 @@ async def shutdown(ctx: dict) -> None:
 
 
 cron_jobs = [
-    {
-        "coroutine": scan_groups,
-        "name": "scan_groups",
-        "second": {i for i in range(0, 60, settings.EXTRACT_SCAN_INTERVAL_SECONDS)},
-    },
-    {
-        "coroutine": decay_sweep,
-        "name": "decay_sweep",
-        "hour": {i for i in range(0, 24, settings.DECAY_SWEEP_INTERVAL_HOURS)},
-        "minute": {0},
-    },
+    cron(
+        scan_groups,
+        name="scan_groups",
+        second={i for i in range(0, 60, settings.EXTRACT_SCAN_INTERVAL_SECONDS)},
+    ),
+    cron(
+        decay_sweep,
+        name="decay_sweep",
+        hour={i for i in range(0, 24, settings.DECAY_SWEEP_INTERVAL_HOURS)},
+        minute={0},
+        second={0},
+    ),
 ]
