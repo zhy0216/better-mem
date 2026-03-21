@@ -1,12 +1,19 @@
-# Memory Service
+# Better-Mem
 
-Fact-centric long-term memory system for conversational AI agents. Extracts structured facts from conversations, stores them with vector embeddings, and retrieves relevant context via hybrid search.
+Proposition-centric, belief-aware long-term memory system for conversational AI agents. Extracts structured propositions from conversations, tracks belief confidence with evidence, and retrieves relevant context via hybrid search.
+
+## Core Concepts
+
+- **Proposition** — the atomic content unit: a single, self-contained statement (e.g. "Zhang San plans to visit Tokyo in April 2024")
+- **Belief** — the system's current confidence in a proposition, updated as new evidence arrives (1:1 with proposition)
+- **Evidence** — traceable supporting or contradicting signals attached to a proposition
+- **Semantic Key** — a slot identifier (e.g. `residence`, `favorite_editor`) enabling same-slot competition and conflict resolution
 
 ## Architecture
 
-- **API server** (FastAPI) — ingests messages, serves recall queries
-- **Background worker** (arq) — async fact extraction, profile synthesis, decay sweeps
-- **PostgreSQL + pgvector** — fact storage and vector search
+- **API server** (FastAPI) — ingests messages, serves recall queries, proposition & belief management
+- **Background worker** (arq) — async proposition extraction, belief updates, profile synthesis, decay sweeps
+- **PostgreSQL + pgvector** — proposition/belief/evidence storage and vector search
 - **Redis** — message buffer, recall cache, arq queue
 
 ## Requirements
@@ -36,7 +43,7 @@ Edit `.env` and set at minimum:
 | Variable | Description |
 |---|---|
 | `MEM_LLM_API_KEY` | API key for the LLM provider |
-| `MEM_EXTRACT_MODEL` | Model for fact extraction (default: `gpt-4.1-mini`) |
+| `MEM_EXTRACT_MODEL` | Model for proposition extraction (default: `gpt-4.1-mini`) |
 | `MEM_ASSEMBLE_MODEL` | Model for context assembly (default: `gpt-4.1-mini`) |
 | `MEM_LLM_BASE_URL` | Base URL if using a custom/self-hosted endpoint (optional) |
 | `MEM_EMBEDDING_MODEL` | Sentence-transformer model (default: `BAAI/bge-m3`) |
@@ -72,17 +79,18 @@ In a separate terminal:
 make worker
 ```
 
-The worker handles async fact extraction, profile synthesis, and memory decay sweeps.
+The worker handles async proposition extraction, belief updates, profile synthesis, and decay sweeps.
 
 ## API
 
 ### `POST /v1/memorize`
 
-Ingest conversation messages. Set `extract_mode` to `"async"` (default, queues extraction) or `"sync"` (blocks until facts are extracted and returned).
+Ingest conversation messages. Set `extract_mode` to `"async"` (default, queues extraction) or `"sync"` (blocks until propositions are extracted and returned).
 
 ```json
 {
   "group_id": "conv-123",
+  "user_id": "user-1",
   "tenant_id": "default",
   "extract_mode": "async",
   "messages": [
@@ -94,7 +102,7 @@ Ingest conversation messages. Set `extract_mode` to `"async"` (default, queues e
 
 ### `POST /v1/recall`
 
-Retrieve relevant memories for a query via hybrid search. Set `assemble: true` to get an LLM-assembled context string.
+Retrieve relevant memories via hybrid search. Propositions are ranked by a weighted combination of semantic relevance, belief confidence, utility importance, freshness, and access frequency. Set `assemble: true` to get an LLM-assembled context string.
 
 ```json
 {
@@ -106,25 +114,42 @@ Retrieve relevant memories for a query via hybrid search. Set `assemble: true` t
 }
 ```
 
-### `GET /v1/facts`
+### `GET /v1/propositions`
 
-List stored facts for a user.
+List stored propositions for a user.
 
 ```
-GET /v1/facts?user_id=user-1&tenant_id=default&status=active
+GET /v1/propositions?user_id=user-1&tenant_id=default&status=active
 ```
 
-### `PATCH /v1/facts/{fact_id}`
+### `DELETE /v1/propositions/{proposition_id}`
 
-Update a fact's content, tags, importance, or metadata.
+Soft-delete a proposition (marks its belief as deprecated).
 
-### `DELETE /v1/facts/{fact_id}`
+### `POST /v1/propositions/{proposition_id}/evidence`
 
-Soft-delete a fact.
+Inject evidence for a proposition. Belief confidence is recalculated automatically.
+
+```json
+{
+  "direction": "support",
+  "evidence_type": "utterance",
+  "weight": 1.0,
+  "quoted_text": "I really enjoy hiking in the mountains."
+}
+```
+
+### `GET /v1/propositions/{proposition_id}/evidence`
+
+Retrieve evidence trail for a proposition (audit & explainability).
+
+### `PATCH /v1/beliefs/{proposition_id}`
+
+Manually adjust a proposition's belief (confidence, importance, status).
 
 ### `GET /v1/profile/{user_id}`
 
-Retrieve the synthesized user profile (personality traits, summary, etc.).
+Retrieve the synthesized user profile (personality traits, summary, etc.). Profile is generated from high-confidence, high-utility propositions.
 
 ### `GET /health`
 
@@ -147,7 +172,7 @@ All settings use the `MEM_` prefix and can be set in `.env` or as environment va
 |---|---|---|
 | `MEM_DATABASE_URL` | `postgresql://memory:memory@localhost:5432/memory` | PostgreSQL connection |
 | `MEM_REDIS_URL` | `redis://localhost:6379/0` | Redis connection |
-| `MEM_EXTRACT_MODEL` | `gpt-4.1-mini` | LLM for fact extraction |
+| `MEM_EXTRACT_MODEL` | `gpt-4.1-mini` | LLM for proposition extraction |
 | `MEM_ASSEMBLE_MODEL` | `gpt-4.1-mini` | LLM for context assembly |
 | `MEM_LLM_API_KEY` | — | LLM provider API key |
 | `MEM_LLM_BASE_URL` | — | Custom LLM base URL |
@@ -156,9 +181,10 @@ All settings use the `MEM_` prefix and can be set in `.env` or as environment va
 | `MEM_EMBEDDING_DEVICE` | `cpu` | `cpu` or `cuda` |
 | `MEM_SESSION_TIME_GAP_MINUTES` | `30` | Gap that splits sessions |
 | `MEM_EXTRACT_SCAN_INTERVAL_SECONDS` | `30` | Worker polling interval |
-| `MEM_PROFILE_FACT_THRESHOLD` | `10` | Facts needed to trigger profile synthesis |
+| `MEM_PROFILE_FACT_THRESHOLD` | `10` | Propositions needed to trigger profile synthesis |
 | `MEM_PROFILE_TIME_THRESHOLD_HOURS` | `24` | Time threshold for profile re-synthesis |
-| `MEM_DEFAULT_DECAY_RATE` | `0.01` | Memory importance decay rate |
+| `MEM_PROFILE_FORCE_ON_DECLARATION` | `true` | Immediately re-synthesize profile on user declarations |
+| `MEM_DEFAULT_DECAY_RATE` | `0.01` | Default belief freshness decay rate |
 | `MEM_DECAY_SWEEP_INTERVAL_HOURS` | `6` | How often the decay sweep runs |
 | `MEM_PORT` | `8000` | API server port |
 | `MEM_LOG_LEVEL` | `info` | Logging level |
