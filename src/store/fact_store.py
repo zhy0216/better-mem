@@ -90,9 +90,19 @@ async def get_by_id(fact_id: UUID, tenant_id: str = "default") -> Fact | None:
     return _row_to_fact(row) if row else None
 
 
-async def update(fact_id: UUID, update: FactUpdate, tenant_id: str = "default") -> Fact | None:
+async def update(
+    fact_id: UUID, update: FactUpdate, tenant_id: str = "default", embedding: list[float] | None = None,
+) -> Fact | None:
     pool = get_pool()
     fields, params, idx = [], [], 1
+    if update.content is not None:
+        fields.append(f"content = ${idx}")
+        params.append(update.content)
+        idx += 1
+        if embedding is not None:
+            fields.append(f"embedding = ${idx}::vector")
+            params.append(f"[{','.join(str(v) for v in embedding)}]")
+            idx += 1
     if update.tags is not None:
         fields.append(f"tags = ${idx}")
         params.append(update.tags)
@@ -127,23 +137,28 @@ async def soft_delete(fact_id: UUID, tenant_id: str = "default") -> bool:
     return result == "UPDATE 1"
 
 
-async def mark_superseded(old_fact_id: UUID, superseded_by: UUID, conn=None) -> None:
+async def mark_superseded(
+    old_fact_id: UUID,
+    superseded_by: UUID,
+    tenant_id: str = "default",
+    conn=None,
+) -> None:
     async def _do(c) -> None:
         await c.execute(
             """
             UPDATE facts
             SET status = 'superseded', superseded_by = $2, updated_at = now()
-            WHERE id = $1
+            WHERE id = $1 AND tenant_id = $3
             """,
-            old_fact_id, superseded_by,
+            old_fact_id, superseded_by, tenant_id,
         )
         await c.execute(
             """
             UPDATE facts
             SET supersedes = $2, updated_at = now()
-            WHERE id = $1
+            WHERE id = $1 AND tenant_id = $3
             """,
-            superseded_by, old_fact_id,
+            superseded_by, old_fact_id, tenant_id,
         )
 
     if conn is not None:
@@ -179,6 +194,7 @@ async def vector_search(
           AND ($7::timestamptz IS NULL OR occurred_at <= $7)
           AND ($8::text[] IS NULL OR fact_type = ANY($8))
           AND ($9::text[] IS NULL OR tags @> $9)
+          AND (valid_until IS NULL OR valid_until > now())
         ORDER BY embedding <=> $1::vector
         LIMIT $10
     """
@@ -236,6 +252,7 @@ async def keyword_search(
           AND ($7::timestamptz IS NULL OR occurred_at <= $7)
           AND ($8::text[] IS NULL OR fact_type = ANY($8))
           AND ($9::text[] IS NULL OR tags @> $9)
+          AND (valid_until IS NULL OR valid_until > now())
         ORDER BY score DESC
         LIMIT $10
     """

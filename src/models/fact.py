@@ -37,6 +37,7 @@ class FactCreate(BaseModel):
 
 
 class FactUpdate(BaseModel):
+    content: str | None = None
     tags: list[str] | None = None
     metadata: dict | None = None
     importance: float | None = None

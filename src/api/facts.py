@@ -4,6 +4,7 @@ import structlog
 from fastapi import APIRouter, HTTPException, Query
 
 from src.models.fact import FactUpdate
+from src.services import embedding as embedding_service
 from src.store import fact_store
 
 router = APIRouter()
@@ -62,7 +63,10 @@ async def patch_fact(
     update: FactUpdate,
     tenant_id: str = Query(default="default"),
 ) -> dict:
-    fact = await fact_store.update(fact_id, update, tenant_id)
+    new_embedding = None
+    if update.content is not None:
+        new_embedding = await embedding_service.embed(update.content)
+    fact = await fact_store.update(fact_id, update, tenant_id, embedding=new_embedding)
     if not fact:
         raise HTTPException(status_code=404, detail="Fact not found")
     return {
@@ -84,5 +88,5 @@ async def supersede_fact(
     superseded_by = body.get("superseded_by")
     if not superseded_by:
         raise HTTPException(status_code=422, detail="superseded_by is required")
-    await fact_store.mark_superseded(fact_id, UUID(superseded_by))
+    await fact_store.mark_superseded(fact_id, UUID(superseded_by), tenant_id=tenant_id)
     return {"status": "superseded", "id": str(fact_id), "superseded_by": superseded_by}

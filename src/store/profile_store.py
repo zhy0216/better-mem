@@ -41,7 +41,7 @@ async def get(
             """
             SELECT * FROM profiles
             WHERE tenant_id = $1 AND user_id = $2 AND scope = $3
-              AND ($4::text IS NULL OR group_id = $4)
+              AND (($4::text IS NULL AND group_id IS NULL) OR group_id = $4)
             """,
             tenant_id, user_id, scope, group_id,
         )

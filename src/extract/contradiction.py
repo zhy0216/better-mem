@@ -96,6 +96,7 @@ async def store_facts_with_contradictions(
                         await fact_store.mark_superseded(
                             old_fact_id=contradiction.old_fact_id,
                             superseded_by=new_id,
+                            tenant_id=tenant_id,
                             conn=conn,
                         )
                     except Exception as e:

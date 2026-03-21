@@ -38,6 +38,7 @@ async def process_group(ctx: dict, group_id: str, tenant_id: str = "default") ->
 
     except Exception as e:
         logger.error("process_group_failed", group_id=group_id, error=str(e))
+        await buffer_store.mark_pending([m.id for m in pending])
         raise
     finally:
         await release_extract_lock(tenant_id, group_id)
