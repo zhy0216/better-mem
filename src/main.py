@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 import structlog
 from fastapi import FastAPI
 
-from src.api import facts, health, memorize, profile, recall
+from src.api import health, memorize, profile, propositions, recall
 from src.config import settings
 from src.services.embedding import get_model
 from src.store.cache import close_redis, create_redis
@@ -27,8 +27,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Memory Service",
-    description="Fact-centric long-term memory system for conversational AI agents",
+    title="Better-Mem",
+    description="Proposition-centric long-term memory system for conversational AI agents",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -36,5 +36,5 @@ app = FastAPI(
 app.include_router(health.router)
 app.include_router(memorize.router)
 app.include_router(recall.router)
+app.include_router(propositions.router)
 app.include_router(profile.router)
-app.include_router(facts.router)

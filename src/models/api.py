@@ -4,7 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 from src.models.message import Message
-from src.models.fact import AssembledContext, ScoredFact, SearchFilters
+from src.models.proposition import AssembledContext, SearchFilters
 
 
 class MemorizeRequest(BaseModel):
@@ -24,7 +24,7 @@ class MemorizeAsyncResponse(BaseModel):
 
 class MemorizeSyncResponse(BaseModel):
     status: str = "completed"
-    facts: list[dict]
+    propositions: list[dict]
 
 
 class RecallRequest(BaseModel):
@@ -44,22 +44,22 @@ class ProfileSnippet(BaseModel):
 
 class RecallAssembledResponse(BaseModel):
     context: str
-    facts: list[dict]
+    propositions: list[dict]
     profile_snippet: ProfileSnippet | None = None
     total_candidates: int
     search_time_ms: float
 
 
 class RecallRawResponse(BaseModel):
-    facts: list[dict]
+    propositions: list[dict]
     total_candidates: int
     search_time_ms: float
 
 
-class FactListRequest(BaseModel):
+class PropositionListRequest(BaseModel):
     user_id: str
     tenant_id: str = "default"
-    fact_type: str | None = None
+    proposition_type: str | None = None
     status: str | None = "active"
     limit: int = 50
     offset: int = 0

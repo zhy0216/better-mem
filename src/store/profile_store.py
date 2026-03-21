@@ -23,7 +23,7 @@ def _row_to_profile(row: asyncpg.Record) -> Profile:
         profile_data=ProfileData(**pd) if pd else ProfileData(),
         version=row["version"],
         fact_count=row["fact_count"],
-        last_fact_id=row["last_fact_id"],
+        last_proposition_id=row["last_proposition_id"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -54,7 +54,7 @@ async def upsert(
     tenant_id: str = "default",
     scope: str = "global",
     group_id: str | None = None,
-    last_fact_id: UUID | None = None,
+    last_proposition_id: UUID | None = None,
     fact_count: int = 1,
 ) -> Profile:
     import json
@@ -64,33 +64,33 @@ async def upsert(
         if group_id is None:
             row = await conn.fetchrow(
                 """
-                INSERT INTO profiles (tenant_id, user_id, scope, group_id, profile_data, last_fact_id, fact_count)
+                INSERT INTO profiles (tenant_id, user_id, scope, group_id, profile_data, last_proposition_id, fact_count)
                 VALUES ($1, $2, $3, NULL, $4::jsonb, $5, $6)
                 ON CONFLICT (tenant_id, user_id, scope) WHERE group_id IS NULL
                 DO UPDATE SET
                     profile_data = EXCLUDED.profile_data,
                     version = profiles.version + 1,
                     fact_count = profiles.fact_count + $6,
-                    last_fact_id = EXCLUDED.last_fact_id,
+                    last_proposition_id = EXCLUDED.last_proposition_id,
                     updated_at = now()
                 RETURNING *
                 """,
-                tenant_id, user_id, scope, pd_json, last_fact_id, fact_count,
+                tenant_id, user_id, scope, pd_json, last_proposition_id, fact_count,
             )
         else:
             row = await conn.fetchrow(
                 """
-                INSERT INTO profiles (tenant_id, user_id, scope, group_id, profile_data, last_fact_id, fact_count)
+                INSERT INTO profiles (tenant_id, user_id, scope, group_id, profile_data, last_proposition_id, fact_count)
                 VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
                 ON CONFLICT (tenant_id, user_id, scope, group_id) WHERE group_id IS NOT NULL
                 DO UPDATE SET
                     profile_data = EXCLUDED.profile_data,
                     version = profiles.version + 1,
                     fact_count = profiles.fact_count + $7,
-                    last_fact_id = EXCLUDED.last_fact_id,
+                    last_proposition_id = EXCLUDED.last_proposition_id,
                     updated_at = now()
                 RETURNING *
                 """,
-                tenant_id, user_id, scope, group_id, pd_json, last_fact_id, fact_count,
+                tenant_id, user_id, scope, group_id, pd_json, last_proposition_id, fact_count,
             )
     return _row_to_profile(row)

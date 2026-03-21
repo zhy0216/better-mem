@@ -3,8 +3,12 @@ from dateutil import parser as dateutil_parser
 
 import structlog
 
-from src.extract.prompts import FACT_EXTRACTION_PROMPT
-from src.models.fact import FactCreate
+from src.extract.prompts import PROPOSITION_EXTRACTION_PROMPT
+from src.models.proposition import (
+    DECAY_RATES,
+    PropositionCreate,
+    get_prior,
+)
 from src.models.message import MessageBuffer
 from src.services import embedding as embedding_service
 from src.services import llm as llm_service
@@ -23,15 +27,6 @@ def _format_messages(messages: list[MessageBuffer]) -> str:
         ts = content.get("timestamp", "")
         lines.append(f"[{ts}] {name} ({role}): {text}")
     return "\n".join(lines)
-
-
-_DECAY_RATES: dict[str, float] = {
-    "plan": 0.05,
-    "observation": 0.02,
-    "declaration": 0.005,
-    "preference": 0.005,
-    "relation": 0.003,
-}
 
 
 def _extract_participant_map(messages: list[MessageBuffer]) -> dict[str, str]:
@@ -61,11 +56,20 @@ def _parse_datetime(value: str | None, fallback: str | None = None) -> datetime 
     return None
 
 
-async def extract_facts(
+def _normalize_semantic_key(key: str | None) -> str | None:
+    """Post-process semantic_key: lowercase, strip, normalize separators."""
+    if not key:
+        return None
+    key = key.strip().lower()
+    key = key.replace(" ", "_").replace("-", "_").replace("/", ".")
+    return key or None
+
+
+async def extract_propositions(
     messages: list[MessageBuffer],
     user_id: str,
     timestamp: str | None = None,
-) -> list[FactCreate]:
+) -> list[PropositionCreate]:
     if not timestamp:
         timestamp = datetime.now(tz=timezone.utc).isoformat()
 
@@ -73,7 +77,7 @@ async def extract_facts(
     participant_map = _extract_participant_map(messages)
     participants_str = ", ".join(f"{name} -> {sid}" for name, sid in participant_map.items())
 
-    prompt = FACT_EXTRACTION_PROMPT.format(
+    prompt = PROPOSITION_EXTRACTION_PROMPT.format(
         timestamp=timestamp,
         participants=participants_str or user_id,
         conversation=conversation,
@@ -86,37 +90,46 @@ async def extract_facts(
             temperature=0.1,
         )
     except Exception as e:
-        logger.error("fact_extraction_failed", error=str(e))
+        logger.error("proposition_extraction_failed", error=str(e))
         return []
 
-    raw_facts = data.get("facts", [])
-    logger.info("facts_extracted", count=len(raw_facts))
+    raw_props = data.get("propositions", [])
+    logger.info("propositions_extracted", count=len(raw_props))
 
-    fact_creates: list[FactCreate] = []
-    for f in raw_facts:
-        fact_type = f.get("fact_type", "observation")
-        occurred_at = _parse_datetime(f.get("occurred_at"), fallback=timestamp)
-        fc = FactCreate(
-            content=f["content"],
-            fact_type=fact_type,
-            occurred_at=occurred_at,
-            importance=float(f.get("importance", 0.5)),
-            decay_rate=_DECAY_RATES.get(fact_type, 0.01),
-            valid_from=f.get("valid_from"),
-            valid_until=f.get("valid_until"),
-            tags=f.get("tags", []),
+    creates: list[PropositionCreate] = []
+    for p in raw_props:
+        prop_type = p.get("proposition_type", "observation")
+        observed_at = _parse_datetime(p.get("observed_at"), fallback=timestamp)
+        evidence_type = p.get("evidence_type", "utterance")
+        semantic_key = _normalize_semantic_key(p.get("semantic_key"))
+        prior = get_prior(prop_type, evidence_type)
+
+        pc = PropositionCreate(
+            canonical_text=p["canonical_text"],
+            proposition_type=prop_type,
+            semantic_key=semantic_key,
+            subject_id=p.get("subject_id") or None,
+            valid_from=_parse_datetime(p.get("valid_from")),
+            valid_until=_parse_datetime(p.get("valid_until")),
+            first_observed_at=observed_at,
+            tags=p.get("tags", []),
+            importance=float(p.get("importance", 0.5)),
+            prior=prior,
+            evidence_type=evidence_type,
+            speaker_id=p.get("speaker_id") or None,
             source_type="conversation",
-            speaker_id=f.get("speaker_id") or None,
+            quoted_text=p.get("quoted_text"),
+            observed_at=observed_at,
         )
-        fact_creates.append(fc)
+        creates.append(pc)
 
-    if fact_creates:
-        texts = [fc.content for fc in fact_creates]
+    if creates:
+        texts = [pc.canonical_text for pc in creates]
         try:
             embeddings = await embedding_service.embed_batch(texts)
-            for fc, emb in zip(fact_creates, embeddings):
-                fc.embedding = emb
+            for pc, emb in zip(creates, embeddings):
+                pc.embedding = emb
         except Exception as e:
             logger.error("embedding_failed", error=str(e))
 
-    return fact_creates
+    return creates

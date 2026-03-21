@@ -4,16 +4,21 @@ from uuid import uuid4
 
 import pytest
 
-from src.models.fact import ScoredFact
+from src.models.proposition import ScoredProposition
 
 
-def make_scored_fact(content: str = "some fact") -> ScoredFact:
-    return ScoredFact(
+def make_scored_prop(text: str = "some proposition") -> ScoredProposition:
+    return ScoredProposition(
         id=uuid4(),
-        content=content,
-        fact_type="observation",
-        occurred_at=datetime(2024, 3, 14, tzinfo=timezone.utc),
-        importance=0.5,
+        canonical_text=text,
+        proposition_type="observation",
+        confidence=0.8,
+        utility_importance=0.5,
+        freshness_decay=0.01,
+        access_count=0,
+        belief_status="active",
+        first_observed_at=datetime(2024, 3, 14, tzinfo=timezone.utc),
+        last_observed_at=datetime(2024, 3, 14, tzinfo=timezone.utc),
         metadata={},
         tags=[],
         score=0.9,
@@ -23,13 +28,13 @@ def make_scored_fact(content: str = "some fact") -> ScoredFact:
 
 @pytest.mark.asyncio
 async def test_recall_raw(client):
-    candidates = [make_scored_fact("Zhang San likes Tokyo.")]
+    candidates = [make_scored_prop("Zhang San likes Tokyo.")]
 
     with (
         patch("src.api.recall.cache.get_recall_cache", AsyncMock(return_value=None)),
         patch("src.api.recall.cache.set_recall_cache", AsyncMock()),
         patch("src.api.recall.searcher.hybrid_search", AsyncMock(return_value=(candidates, 42.0))),
-        patch("src.api.recall.fact_store.track_access", AsyncMock()),
+        patch("src.api.recall.proposition_store.track_access", AsyncMock()),
         patch("src.api.recall.profile_store.get", AsyncMock(return_value=None)),
     ):
         resp = await client.post(
@@ -44,19 +49,19 @@ async def test_recall_raw(client):
 
     assert resp.status_code == 200
     data = resp.json()
-    assert "facts" in data
+    assert "propositions" in data
     assert data["total_candidates"] == 1
     assert data["search_time_ms"] == 42.0
 
 
 @pytest.mark.asyncio
 async def test_recall_assembled(client):
-    from src.models.api import AssembledContext
+    from src.models.proposition import AssembledContext
 
-    candidates = [make_scored_fact("Zhang San plans Tokyo trip.")]
+    candidates = [make_scored_prop("Zhang San plans Tokyo trip.")]
     assembled = AssembledContext(
         context="Zhang San is planning a Tokyo trip.",
-        selected_fact_ids=[str(candidates[0].id)],
+        selected_proposition_ids=[str(candidates[0].id)],
         confidence=0.9,
         information_gaps=[],
     )
@@ -65,7 +70,7 @@ async def test_recall_assembled(client):
         patch("src.api.recall.cache.get_recall_cache", AsyncMock(return_value=None)),
         patch("src.api.recall.cache.set_recall_cache", AsyncMock()),
         patch("src.api.recall.searcher.hybrid_search", AsyncMock(return_value=(candidates, 30.0))),
-        patch("src.api.recall.fact_store.track_access", AsyncMock()),
+        patch("src.api.recall.proposition_store.track_access", AsyncMock()),
         patch("src.api.recall.profile_store.get", AsyncMock(return_value=None)),
         patch("src.api.recall.assembler.assemble_context", AsyncMock(return_value=assembled)),
     ):
@@ -88,7 +93,7 @@ async def test_recall_assembled(client):
 @pytest.mark.asyncio
 async def test_recall_returns_cache(client):
     cached = {
-        "facts": [],
+        "propositions": [],
         "total_candidates": 0,
         "search_time_ms": 10.0,
     }

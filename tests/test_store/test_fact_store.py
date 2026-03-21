@@ -4,32 +4,24 @@ from uuid import uuid4
 
 import pytest
 
-from src.models.fact import FactCreate, FactUpdate
-from src.store import fact_store
+from src.store import proposition_store
 
 
-def make_fact_row(fact_id=None):
-    fid = fact_id or uuid4()
+def make_proposition_row(prop_id=None):
+    pid = prop_id or uuid4()
     return {
-        "id": fid,
+        "id": pid,
         "tenant_id": "default",
         "user_id": "user_001",
         "group_id": "group_abc",
-        "content": "Zhang San plans to visit Tokyo.",
-        "fact_type": "plan",
-        "occurred_at": datetime(2024, 3, 14, tzinfo=timezone.utc),
+        "subject_id": None,
+        "canonical_text": "Zhang San plans to visit Tokyo.",
+        "proposition_type": "plan",
+        "semantic_key": "trip_tokyo_2024",
         "valid_from": None,
         "valid_until": None,
-        "superseded_by": None,
-        "supersedes": None,
-        "status": "active",
-        "importance": 0.7,
-        "access_count": 0,
-        "last_accessed": None,
-        "decay_rate": 0.01,
-        "source_type": "conversation",
-        "source_id": None,
-        "source_meta": None,
+        "first_observed_at": datetime(2024, 3, 14, tzinfo=timezone.utc),
+        "last_observed_at": datetime(2024, 3, 14, tzinfo=timezone.utc),
         "tags": ["travel", "tokyo"],
         "metadata": {},
         "created_at": datetime(2024, 3, 14, tzinfo=timezone.utc),
@@ -49,42 +41,42 @@ def make_mock_pool(fetchrow_return=None, fetch_return=None, execute_return="UPDA
 
 @pytest.mark.asyncio
 async def test_get_by_id_found():
-    row = make_fact_row()
+    row = make_proposition_row()
     pool, _ = make_mock_pool(fetchrow_return=row)
-    with patch("src.store.fact_store.get_pool", return_value=pool):
-        result = await fact_store.get_by_id(row["id"])
+    with patch("src.store.proposition_store.get_pool", return_value=pool):
+        result = await proposition_store.get_by_id(row["id"])
     assert result is not None
-    assert result.content == "Zhang San plans to visit Tokyo."
+    assert result.canonical_text == "Zhang San plans to visit Tokyo."
 
 
 @pytest.mark.asyncio
 async def test_get_by_id_not_found():
     pool, _ = make_mock_pool(fetchrow_return=None)
-    with patch("src.store.fact_store.get_pool", return_value=pool):
-        result = await fact_store.get_by_id(uuid4())
+    with patch("src.store.proposition_store.get_pool", return_value=pool):
+        result = await proposition_store.get_by_id(uuid4())
     assert result is None
 
 
 @pytest.mark.asyncio
 async def test_soft_delete_success():
     pool, _ = make_mock_pool(execute_return="UPDATE 1")
-    with patch("src.store.fact_store.get_pool", return_value=pool):
-        ok = await fact_store.soft_delete(uuid4())
+    with patch("src.store.proposition_store.get_pool", return_value=pool):
+        ok = await proposition_store.soft_delete(uuid4())
     assert ok is True
 
 
 @pytest.mark.asyncio
 async def test_soft_delete_not_found():
     pool, _ = make_mock_pool(execute_return="UPDATE 0")
-    with patch("src.store.fact_store.get_pool", return_value=pool):
-        ok = await fact_store.soft_delete(uuid4())
+    with patch("src.store.proposition_store.get_pool", return_value=pool):
+        ok = await proposition_store.soft_delete(uuid4())
     assert ok is False
 
 
 @pytest.mark.asyncio
-async def test_list_facts():
-    rows = [make_fact_row(), make_fact_row()]
+async def test_list_propositions():
+    rows = [make_proposition_row(), make_proposition_row()]
     pool, _ = make_mock_pool(fetch_return=rows)
-    with patch("src.store.fact_store.get_pool", return_value=pool):
-        facts = await fact_store.list_facts(user_id="user_001")
-    assert len(facts) == 2
+    with patch("src.store.proposition_store.get_pool", return_value=pool):
+        props = await proposition_store.list_propositions(user_id="user_001")
+    assert len(props) == 2

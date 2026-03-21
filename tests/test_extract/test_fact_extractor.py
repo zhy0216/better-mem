@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import pytest
 
-from src.extract.fact_extractor import extract_facts
+from src.extract.proposition_extractor import extract_propositions
 from src.models.message import MessageBuffer
 
 
@@ -29,41 +29,42 @@ def make_buffer(content_text: str, speaker_name: str = "Zhang San") -> MessageBu
 
 
 @pytest.mark.asyncio
-async def test_extract_facts_returns_list():
+async def test_extract_propositions_returns_list():
     messages = [
         make_buffer("I'm planning a trip to Tokyo next month."),
         make_buffer("My budget is about $3000."),
     ]
     mock_llm_response = {
-        "facts": [
+        "propositions": [
             {
-                "content": "Zhang San plans to visit Tokyo next month.",
-                "fact_type": "plan",
+                "canonical_text": "Zhang San plans to visit Tokyo next month.",
+                "proposition_type": "plan",
+                "semantic_key": "trip_tokyo_2024",
                 "importance": 0.7,
                 "tags": ["travel", "tokyo"],
             }
         ]
     }
     with (
-        patch("src.extract.fact_extractor.llm_service.complete_json", AsyncMock(return_value=mock_llm_response)),
-        patch("src.extract.fact_extractor.embedding_service.embed_batch", AsyncMock(return_value=[[0.1] * 1024])),
+        patch("src.extract.proposition_extractor.llm_service.complete_json", AsyncMock(return_value=mock_llm_response)),
+        patch("src.extract.proposition_extractor.embedding_service.embed_batch", AsyncMock(return_value=[[0.1] * 1024])),
     ):
-        facts = await extract_facts(messages, user_id="user_001")
+        props = await extract_propositions(messages, user_id="user_001")
 
-    assert len(facts) == 1
-    assert facts[0].fact_type == "plan"
-    assert facts[0].importance == 0.7
-    assert facts[0].embedding is not None
-    assert len(facts[0].embedding) == 1024
+    assert len(props) == 1
+    assert props[0].proposition_type == "plan"
+    assert props[0].importance == 0.7
+    assert props[0].embedding is not None
+    assert len(props[0].embedding) == 1024
 
 
 @pytest.mark.asyncio
-async def test_extract_facts_empty_on_llm_failure():
+async def test_extract_propositions_empty_on_llm_failure():
     messages = [make_buffer("Hello there.")]
     with patch(
-        "src.extract.fact_extractor.llm_service.complete_json",
+        "src.extract.proposition_extractor.llm_service.complete_json",
         AsyncMock(side_effect=RuntimeError("LLM unavailable")),
     ):
-        facts = await extract_facts(messages, user_id="user_001")
+        props = await extract_propositions(messages, user_id="user_001")
 
-    assert facts == []
+    assert props == []

@@ -13,7 +13,7 @@ _session_detector = SessionDetector()
 
 
 async def process_group(ctx: dict, group_id: str, tenant_id: str = "default") -> dict:
-    """Extract facts from buffered messages for a group."""
+    """Extract propositions from buffered messages for a group."""
     logger.info("process_group_start", group_id=group_id, tenant_id=tenant_id)
 
     pending = await buffer_store.get_pending(group_id, tenant_id)
@@ -33,8 +33,8 @@ async def process_group(ctx: dict, group_id: str, tenant_id: str = "default") ->
 
         await buffer_store.mark_consumed([m.id for m in pending])
 
-        logger.info("process_group_done", group_id=group_id, facts_saved=len(saved))
-        return {"status": "ok", "facts_saved": len(saved)}
+        logger.info("process_group_done", group_id=group_id, propositions_saved=len(saved))
+        return {"status": "ok", "propositions_saved": len(saved)}
 
     except Exception as e:
         logger.error("process_group_failed", group_id=group_id, error=str(e))
@@ -74,18 +74,20 @@ async def scan_groups(ctx: dict) -> dict:
 
 
 async def decay_sweep(ctx: dict) -> dict:
-    """Periodic task: expire facts that are past their valid_until date."""
+    """Periodic task: deprecate beliefs for propositions past their valid_until date."""
     from src.store.database import get_pool
 
     pool = get_pool()
     async with pool.acquire() as conn:
         result = await conn.execute("""
-            UPDATE facts
-            SET status = 'expired', updated_at = now()
+            UPDATE beliefs
+            SET status = 'deprecated', updated_at = now()
             WHERE status = 'active'
-              AND valid_until IS NOT NULL
-              AND valid_until < now()
+              AND proposition_id IN (
+                  SELECT id FROM propositions
+                  WHERE valid_until IS NOT NULL AND valid_until < now()
+              )
         """)
     updated = int(result.split()[-1]) if result else 0
-    logger.info("decay_sweep_done", expired_count=updated)
-    return {"expired": updated}
+    logger.info("decay_sweep_done", deprecated_count=updated)
+    return {"deprecated": updated}

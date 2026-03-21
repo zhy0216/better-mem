@@ -39,16 +39,15 @@ async def memorize(req: MemorizeRequest) -> MemorizeAsyncResponse | MemorizeSync
 
         return MemorizeSyncResponse(
             status="completed",
-            facts=[
+            propositions=[
                 {
-                    "id": str(f.id),
-                    "content": f.content,
-                    "fact_type": f.fact_type,
-                    "occurred_at": f.occurred_at.isoformat(),
-                    "importance": f.importance,
-                    "tags": f.tags,
+                    "id": str(p.id),
+                    "canonical_text": p.canonical_text,
+                    "proposition_type": p.proposition_type,
+                    "semantic_key": p.semantic_key,
+                    "tags": p.tags,
                 }
-                for f in saved
+                for p in saved
             ],
         )
 

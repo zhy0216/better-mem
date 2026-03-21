@@ -4,19 +4,23 @@ from uuid import uuid4
 
 import pytest
 
-from src.models.api import AssembledContext
-from src.models.fact import ScoredFact
+from src.models.proposition import AssembledContext, ScoredProposition
 from src.retrieve.assembler import assemble_context
 
 
-def make_candidates(n: int = 2) -> list[ScoredFact]:
+def make_candidates(n: int = 2) -> list[ScoredProposition]:
     return [
-        ScoredFact(
+        ScoredProposition(
             id=uuid4(),
-            content=f"Fact number {i}",
-            fact_type="observation",
-            occurred_at=datetime(2024, 3, 14, tzinfo=timezone.utc),
-            importance=0.5,
+            canonical_text=f"Proposition number {i}",
+            proposition_type="observation",
+            confidence=0.8,
+            utility_importance=0.5,
+            freshness_decay=0.01,
+            access_count=0,
+            belief_status="active",
+            first_observed_at=datetime(2024, 3, 14, tzinfo=timezone.utc),
+            last_observed_at=datetime(2024, 3, 14, tzinfo=timezone.utc),
             metadata={},
             tags=[],
             score=0.9 - i * 0.05,
@@ -32,7 +36,7 @@ async def test_assemble_context_returns_assembled():
     ids = [str(c.id) for c in candidates]
     llm_response = {
         "context": "Zhang San is planning a Tokyo trip.",
-        "selected_fact_ids": ids,
+        "selected_proposition_ids": ids,
         "confidence": 0.9,
         "information_gaps": [],
     }

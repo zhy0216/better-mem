@@ -3,10 +3,10 @@ import time
 
 import structlog
 
-from src.models.fact import ScoredFact, SearchFilters
+from src.models.proposition import ScoredProposition, SearchFilters
 from src.retrieve.ranker import reciprocal_rank_fusion
 from src.services import embedding as embedding_service
-from src.store import fact_store
+from src.store import proposition_store
 
 logger = structlog.get_logger(__name__)
 
@@ -17,20 +17,20 @@ async def hybrid_search(
     tenant_id: str = "default",
     top_k: int = 50,
     filters: SearchFilters | None = None,
-) -> tuple[list[ScoredFact], float]:
+) -> tuple[list[ScoredProposition], float]:
     start = time.monotonic()
 
     query_embedding = await embedding_service.embed(query)
 
     vector_results, keyword_results = await asyncio.gather(
-        fact_store.vector_search(
+        proposition_store.vector_search(
             embedding=query_embedding,
             user_id=user_id,
             tenant_id=tenant_id,
             top_k=top_k,
             filters=filters,
         ),
-        fact_store.keyword_search(
+        proposition_store.keyword_search(
             query=query,
             user_id=user_id,
             tenant_id=tenant_id,

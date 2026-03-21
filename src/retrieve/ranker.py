@@ -2,86 +2,128 @@ import math
 from datetime import datetime, timezone
 from uuid import UUID
 
-from src.models.fact import ScoredFact
+from src.models.proposition import ScoredProposition
+
+# Weights per §8 of proposition_plan.md
+W_SEMANTIC_RELEVANCE = 0.40
+W_BELIEF_CONFIDENCE = 0.25
+W_UTILITY_IMPORTANCE = 0.20
+W_FRESHNESS = 0.10
+W_ACCESS_BOOST = 0.05
 
 
 def reciprocal_rank_fusion(
-    vector_results: list[ScoredFact],
-    keyword_results: list[ScoredFact],
+    vector_results: list[ScoredProposition],
+    keyword_results: list[ScoredProposition],
     k: int = 60,
-) -> list[ScoredFact]:
-    """Merge two ranked lists using Reciprocal Rank Fusion, then re-rank by relevance."""
-    scores: dict[UUID, float] = {}
-    fact_map: dict[UUID, ScoredFact] = {}
+) -> list[ScoredProposition]:
+    """Merge two ranked lists using RRF, then re-rank with weighted-sum scoring."""
+    rrf_scores: dict[UUID, float] = {}
+    prop_map: dict[UUID, ScoredProposition] = {}
 
-    for rank, fact in enumerate(vector_results):
-        scores[fact.id] = scores.get(fact.id, 0.0) + 1.0 / (k + rank + 1)
-        fact_map[fact.id] = fact
+    for rank, prop in enumerate(vector_results):
+        rrf_scores[prop.id] = rrf_scores.get(prop.id, 0.0) + 1.0 / (k + rank + 1)
+        prop_map[prop.id] = prop
 
-    for rank, fact in enumerate(keyword_results):
-        scores[fact.id] = scores.get(fact.id, 0.0) + 1.0 / (k + rank + 1)
-        if fact.id not in fact_map:
-            fact_map[fact.id] = fact
+    for rank, prop in enumerate(keyword_results):
+        rrf_scores[prop.id] = rrf_scores.get(prop.id, 0.0) + 1.0 / (k + rank + 1)
+        if prop.id not in prop_map:
+            prop_map[prop.id] = prop
         else:
-            existing = fact_map[fact.id]
-            if fact.source != existing.source:
-                combined = ScoredFact(
+            existing = prop_map[prop.id]
+            if prop.source != existing.source:
+                combined = ScoredProposition(
                     id=existing.id,
-                    content=existing.content,
-                    fact_type=existing.fact_type,
-                    occurred_at=existing.occurred_at,
-                    importance=existing.importance,
-                    decay_rate=existing.decay_rate,
+                    canonical_text=existing.canonical_text,
+                    proposition_type=existing.proposition_type,
+                    semantic_key=existing.semantic_key,
+                    confidence=existing.confidence,
+                    utility_importance=existing.utility_importance,
+                    freshness_decay=existing.freshness_decay,
                     access_count=existing.access_count,
+                    belief_status=existing.belief_status,
+                    first_observed_at=existing.first_observed_at,
+                    last_observed_at=existing.last_observed_at,
                     metadata=existing.metadata,
                     tags=existing.tags,
-                    score=scores[fact.id],
+                    score=rrf_scores[prop.id],
                     source="hybrid",
                 )
-                fact_map[fact.id] = combined
+                prop_map[prop.id] = combined
 
     now = datetime.now(tz=timezone.utc)
+    # Normalize RRF scores to 0-1
+    max_rrf = max(rrf_scores.values()) if rrf_scores else 1.0
+    if max_rrf == 0:
+        max_rrf = 1.0
+
     merged = []
-    for fid, rrf_score in sorted(scores.items(), key=lambda x: x[1], reverse=True):
-        fact = fact_map[fid]
-        relevance = compute_relevance_score(
-            importance=fact.importance,
-            decay_rate=fact.decay_rate,
-            occurred_at=fact.occurred_at,
-            access_count=fact.access_count,
+    for pid, rrf_score in sorted(rrf_scores.items(), key=lambda x: x[1], reverse=True):
+        prop = prop_map[pid]
+        semantic_relevance = rrf_score / max_rrf
+
+        final_score = compute_retrieval_score(
+            semantic_relevance=semantic_relevance,
+            confidence=prop.confidence,
+            utility_importance=prop.utility_importance,
+            freshness_decay=prop.freshness_decay,
+            last_observed_at=prop.last_observed_at or prop.first_observed_at,
+            access_count=prop.access_count,
             now=now,
         )
         merged.append(
-            ScoredFact(
-                id=fact.id,
-                content=fact.content,
-                fact_type=fact.fact_type,
-                occurred_at=fact.occurred_at,
-                importance=fact.importance,
-                decay_rate=fact.decay_rate,
-                access_count=fact.access_count,
-                metadata=fact.metadata,
-                tags=fact.tags,
-                score=rrf_score * relevance,
-                source=fact.source,
+            ScoredProposition(
+                id=prop.id,
+                canonical_text=prop.canonical_text,
+                proposition_type=prop.proposition_type,
+                semantic_key=prop.semantic_key,
+                confidence=prop.confidence,
+                utility_importance=prop.utility_importance,
+                freshness_decay=prop.freshness_decay,
+                access_count=prop.access_count,
+                belief_status=prop.belief_status,
+                first_observed_at=prop.first_observed_at,
+                last_observed_at=prop.last_observed_at,
+                metadata=prop.metadata,
+                tags=prop.tags,
+                score=final_score,
+                source=prop.source,
             )
         )
-    merged.sort(key=lambda f: f.score, reverse=True)
+    merged.sort(key=lambda p: p.score, reverse=True)
     return merged
 
 
-def compute_relevance_score(
-    importance: float,
-    decay_rate: float,
-    occurred_at: datetime,
+def compute_retrieval_score(
+    semantic_relevance: float,
+    confidence: float,
+    utility_importance: float,
+    freshness_decay: float,
+    last_observed_at: datetime | None,
     access_count: int,
     now: datetime | None = None,
 ) -> float:
+    """Weighted-sum retrieval score per §8."""
     if now is None:
         now = datetime.now(tz=timezone.utc)
-    if occurred_at.tzinfo is None:
-        occurred_at = occurred_at.replace(tzinfo=timezone.utc)
-    age_days = (now - occurred_at).total_seconds() / 86400
-    recency_factor = math.exp(-decay_rate * age_days)
-    access_boost = 1.0 + 0.1 * math.log1p(access_count)
-    return importance * recency_factor * access_boost
+
+    # Freshness factor
+    if last_observed_at is not None:
+        if last_observed_at.tzinfo is None:
+            last_observed_at = last_observed_at.replace(tzinfo=timezone.utc)
+        age_days = (now - last_observed_at).total_seconds() / 86400
+        freshness_factor = math.exp(-freshness_decay * age_days)
+    else:
+        freshness_factor = 0.5
+
+    # Access boost: 1.0 + 0.1*log1p(n), normalized to ~0-1 range
+    raw_access = 1.0 + 0.1 * math.log1p(access_count)
+    access_boost = min(raw_access / 2.0, 1.0)  # rough normalization
+
+    return (
+        W_SEMANTIC_RELEVANCE * semantic_relevance
+        + W_BELIEF_CONFIDENCE * confidence
+        + W_UTILITY_IMPORTANCE * utility_importance
+        + W_FRESHNESS * freshness_factor
+        + W_ACCESS_BOOST * access_boost
+    )

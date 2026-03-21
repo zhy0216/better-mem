@@ -8,7 +8,7 @@ from src.models.api import (
     RecallRequest,
 )
 from src.retrieve import assembler, searcher
-from src.store import cache, fact_store, profile_store
+from src.store import cache, proposition_store, profile_store
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
@@ -36,10 +36,10 @@ async def recall(req: RecallRequest) -> RecallAssembledResponse | RecallRawRespo
         filters=filters,
     )
 
-    hit_ids = [f.id for f in candidates]
+    hit_ids = [p.id for p in candidates]
     if hit_ids:
         try:
-            await fact_store.track_access(hit_ids)
+            await proposition_store.track_access(hit_ids)
         except Exception:
             pass
 
@@ -50,14 +50,14 @@ async def recall(req: RecallRequest) -> RecallAssembledResponse | RecallRawRespo
     if req.assemble:
         assembled = await assembler.assemble_context(req.query, candidates, profile)
 
-        selected_ids = set(assembled.selected_fact_ids)
-        filtered_facts = [f for f in candidates if str(f.id) in selected_ids] or candidates
+        selected_ids = set(assembled.selected_proposition_ids)
+        filtered_props = [p for p in candidates if str(p.id) in selected_ids] or candidates
 
         profile_snippet = None
         if profile:
             relevant_traits = [
-                p.get("trait", "") for p in profile.profile_data.personality[:3]
-                if p.get("trait")
+                t.get("trait", "") for t in profile.profile_data.personality[:3]
+                if t.get("trait")
             ]
             profile_snippet = ProfileSnippet(
                 summary=profile.profile_data.summary,
@@ -66,14 +66,15 @@ async def recall(req: RecallRequest) -> RecallAssembledResponse | RecallRawRespo
 
         response = RecallAssembledResponse(
             context=assembled.context,
-            facts=[
+            propositions=[
                 {
-                    "id": str(f.id),
-                    "content": f.content,
-                    "score": round(f.score, 4),
-                    "source": f.source,
+                    "id": str(p.id),
+                    "canonical_text": p.canonical_text,
+                    "confidence": round(p.confidence, 4),
+                    "score": round(p.score, 4),
+                    "source": p.source,
                 }
-                for f in filtered_facts
+                for p in filtered_props
             ],
             profile_snippet=profile_snippet,
             total_candidates=len(candidates),
@@ -83,18 +84,18 @@ async def recall(req: RecallRequest) -> RecallAssembledResponse | RecallRawRespo
         return response
 
     response = RecallRawResponse(
-        facts=[
+        propositions=[
             {
-                "id": str(f.id),
-                "content": f.content,
-                "fact_type": f.fact_type,
-                "occurred_at": f.occurred_at.isoformat(),
-                "score": round(f.score, 4),
-                "source": f.source,
-                "importance": f.importance,
-                "metadata": f.metadata,
+                "id": str(p.id),
+                "canonical_text": p.canonical_text,
+                "proposition_type": p.proposition_type,
+                "confidence": round(p.confidence, 4),
+                "score": round(p.score, 4),
+                "source": p.source,
+                "utility_importance": p.utility_importance,
+                "metadata": p.metadata,
             }
-            for f in candidates
+            for p in candidates
         ],
         total_candidates=len(candidates),
         search_time_ms=round(elapsed_ms, 1),

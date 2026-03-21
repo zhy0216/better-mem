@@ -22,7 +22,7 @@ class Profile(BaseModel):
     profile_data: ProfileData
     version: int
     fact_count: int
-    last_fact_id: UUID | None
+    last_proposition_id: UUID | None
     created_at: datetime
     updated_at: datetime
 

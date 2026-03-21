@@ -1,84 +1,90 @@
 import asyncio
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
-from httpx import AsyncClient, ASGITransport
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 
-from src.main import app
+from src.models.proposition import Proposition, ScoredProposition
 
 
 @pytest.fixture(scope="session")
-def event_loop_policy():
-    return asyncio.DefaultEventLoopPolicy()
+def event_loop():
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
 
 
 @pytest.fixture
-def fake_fact():
-    from src.models.fact import Fact
-    return Fact(
+def fake_proposition() -> Proposition:
+    return Proposition(
         id=uuid4(),
         tenant_id="default",
         user_id="user_001",
         group_id="group_abc",
-        content="Zhang San plans to visit Tokyo in April 2024.",
-        fact_type="plan",
-        occurred_at=datetime(2024, 3, 14, 10, 30, tzinfo=timezone.utc),
-        valid_from=datetime(2024, 4, 1, tzinfo=timezone.utc),
-        valid_until=datetime(2024, 4, 30, tzinfo=timezone.utc),
-        superseded_by=None,
-        supersedes=None,
-        status="active",
-        importance=0.7,
-        access_count=0,
-        last_accessed=None,
-        decay_rate=0.01,
-        source_type="conversation",
-        source_id=None,
-        source_meta=None,
-        tags=["travel", "tokyo"],
+        subject_id=None,
+        canonical_text="Zhang San likes traveling.",
+        proposition_type="preference",
+        semantic_key="travel_preference",
+        valid_from=None,
+        valid_until=None,
+        first_observed_at=datetime(2024, 3, 14, tzinfo=timezone.utc),
+        last_observed_at=datetime(2024, 3, 14, tzinfo=timezone.utc),
+        tags=["travel"],
         metadata={},
-        created_at=datetime(2024, 3, 14, 10, 30, tzinfo=timezone.utc),
-        updated_at=datetime(2024, 3, 14, 10, 30, tzinfo=timezone.utc),
+        created_at=datetime(2024, 3, 14, tzinfo=timezone.utc),
+        updated_at=datetime(2024, 3, 14, tzinfo=timezone.utc),
     )
 
 
 @pytest.fixture
-def fake_scored_fact(fake_fact):
-    from src.models.fact import ScoredFact
-    return ScoredFact(
-        id=fake_fact.id,
-        content=fake_fact.content,
-        fact_type=fake_fact.fact_type,
-        occurred_at=fake_fact.occurred_at,
-        importance=fake_fact.importance,
-        metadata=fake_fact.metadata,
-        tags=fake_fact.tags,
-        score=0.92,
+def fake_scored_proposition() -> ScoredProposition:
+    return ScoredProposition(
+        id=uuid4(),
+        canonical_text="Zhang San likes traveling.",
+        proposition_type="preference",
+        semantic_key="travel_preference",
+        confidence=0.8,
+        utility_importance=0.5,
+        freshness_decay=0.005,
+        access_count=0,
+        belief_status="active",
+        first_observed_at=datetime(2024, 3, 14, tzinfo=timezone.utc),
+        last_observed_at=datetime(2024, 3, 14, tzinfo=timezone.utc),
+        metadata={},
+        tags=["travel"],
+        score=0.85,
         source="vector",
     )
 
 
 @pytest.fixture
-def mock_db(monkeypatch):
+def mock_db():
+    conn = AsyncMock()
     pool = MagicMock()
-    monkeypatch.setattr("src.store.database._pool", pool)
-    return pool
+    pool.acquire = MagicMock(
+        return_value=AsyncMock(
+            __aenter__=AsyncMock(return_value=conn),
+            __aexit__=AsyncMock(return_value=False),
+        )
+    )
+    return pool, conn
 
 
 @pytest.fixture
-def mock_redis(monkeypatch):
-    r = AsyncMock()
-    r.get = AsyncMock(return_value=None)
-    r.set = AsyncMock(return_value=True)
-    r.delete = AsyncMock(return_value=1)
-    r.rpush = AsyncMock(return_value=1)
-    monkeypatch.setattr("src.store.cache._redis", r)
-    return r
+def mock_redis():
+    return AsyncMock()
 
 
-@pytest.fixture
-async def client(mock_db, mock_redis):
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        yield c
+@pytest_asyncio.fixture
+async def client():
+    from src.main import app
+    with (
+        patch("src.store.database.create_pool"),
+        patch("src.store.cache.create_redis"),
+    ):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as c:
+            yield c
