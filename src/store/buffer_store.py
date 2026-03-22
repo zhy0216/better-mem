@@ -70,31 +70,25 @@ async def get_pending(
     return [_row_to_buffer(r) for r in rows]
 
 
-async def mark_processing(ids: list[UUID]) -> None:
+async def _mark_status(ids: list[UUID], status: str) -> None:
     pool = get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
-            "UPDATE message_buffer SET status = 'processing' WHERE id = ANY($1)",
-            ids,
+            "UPDATE message_buffer SET status = $2 WHERE id = ANY($1)",
+            ids, status,
         )
+
+
+async def mark_processing(ids: list[UUID]) -> None:
+    await _mark_status(ids, "processing")
 
 
 async def mark_consumed(ids: list[UUID]) -> None:
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE message_buffer SET status = 'consumed' WHERE id = ANY($1)",
-            ids,
-        )
+    await _mark_status(ids, "consumed")
 
 
 async def mark_pending(ids: list[UUID]) -> None:
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            "UPDATE message_buffer SET status = 'pending' WHERE id = ANY($1)",
-            ids,
-        )
+    await _mark_status(ids, "pending")
 
 
 async def get_active_group_ids() -> list[tuple[str, str]]:
@@ -125,8 +119,5 @@ async def recover_stuck_processing(stuck_minutes: int = 10) -> int:
         )
     count = int(result.split()[-1]) if result else 0
     if count:
-        import structlog
-        structlog.get_logger(__name__).warning(
-            "recovered_stuck_messages", count=count
-        )
+        logger.warning("recovered_stuck_messages", count=count)
     return count

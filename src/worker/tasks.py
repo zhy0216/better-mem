@@ -20,25 +20,20 @@ async def process_group(ctx: dict, group_id: str, tenant_id: str = "default") ->
     if not pending:
         return {"status": "no_pending_messages"}
 
-    await buffer_store.mark_processing([m.id for m in pending])
-
     try:
         user_id = pending[0].user_id
-        saved = await memorize_service.process_buffered_messages(
+        saved = await memorize_service.process_and_track(
             buffers=pending,
             tenant_id=tenant_id,
             group_id=group_id,
             user_id=user_id,
         )
 
-        await buffer_store.mark_consumed([m.id for m in pending])
-
         logger.info("process_group_done", group_id=group_id, propositions_saved=len(saved))
         return {"status": "ok", "propositions_saved": len(saved)}
 
     except Exception as e:
         logger.error("process_group_failed", group_id=group_id, error=str(e))
-        await buffer_store.mark_pending([m.id for m in pending])
         raise
     finally:
         await release_extract_lock(tenant_id, group_id)

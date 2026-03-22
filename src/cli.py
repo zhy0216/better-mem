@@ -93,19 +93,12 @@ def memorize(user_id, group_id, tenant_id, input_file):
             batch_id=batch_id,
             user_id=user_id,
         )
-        await buffer_store.mark_processing([b.id for b in buffers])
-
-        try:
-            saved = await memorize_service.process_buffered_messages(
-                buffers=buffers,
-                tenant_id=tenant_id,
-                group_id=group_id,
-                user_id=user_id,
-            )
-            await buffer_store.mark_consumed([b.id for b in buffers])
-        except Exception:
-            await buffer_store.mark_pending([b.id for b in buffers])
-            raise
+        saved = await memorize_service.process_and_track(
+            buffers=buffers,
+            tenant_id=tenant_id,
+            group_id=group_id,
+            user_id=user_id,
+        )
 
         result = [
             {

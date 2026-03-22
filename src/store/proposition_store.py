@@ -96,6 +96,16 @@ def compute_confidence(
 # Write operations
 # ---------------------------------------------------------------------------
 
+async def _with_conn(conn, fn):
+    """Run fn(conn) inside a transaction, reusing conn if provided."""
+    if conn is not None:
+        return await fn(conn)
+    pool = get_pool()
+    async with pool.acquire() as c:
+        async with c.transaction():
+            return await fn(c)
+
+
 async def insert_proposition(
     create: PropositionCreate,
     user_id: str,
@@ -180,12 +190,7 @@ async def insert_proposition(
 
         return _row_to_proposition(p_row)
 
-    if conn is not None:
-        return await _do(conn)
-    pool = get_pool()
-    async with pool.acquire() as c:
-        async with c.transaction():
-            return await _do(c)
+    return await _with_conn(conn, _do)
 
 
 async def insert_batch(
@@ -202,12 +207,7 @@ async def insert_batch(
             saved.append(prop)
         return saved
 
-    if conn is not None:
-        return await _do(conn)
-    pool = get_pool()
-    async with pool.acquire() as c:
-        async with c.transaction():
-            return await _do(c)
+    return await _with_conn(conn, _do)
 
 
 async def add_evidence(
@@ -253,13 +253,7 @@ async def add_evidence(
         # Recompute confidence
         await _recompute_belief(c, proposition_id)
 
-    if conn is not None:
-        await _do(conn)
-        return
-    pool = get_pool()
-    async with pool.acquire() as c:
-        async with c.transaction():
-            await _do(c)
+    await _with_conn(conn, _do)
 
 
 async def _recompute_belief(conn, proposition_id: UUID) -> None:
@@ -423,6 +417,35 @@ _JOINED_SELECT = """
            b.access_count, b.status,
 """
 
+_FILTER_WHERE = """
+      AND b.status = ANY(${{s}})
+      AND (${{g}}::text IS NULL OR p.group_id = ${{g}})
+      AND (${{ts}}::timestamptz IS NULL OR p.first_observed_at >= ${{ts}})
+      AND (${{te}}::timestamptz IS NULL OR p.first_observed_at <= ${{te}})
+      AND (${{pt}}::text[] IS NULL OR p.proposition_type = ANY(${{pt}}))
+      AND (${{tg}}::text[] IS NULL OR p.tags @> ${{tg}})
+      AND (p.valid_until IS NULL OR p.valid_until > now())
+      AND (${{mc}}::float IS NULL OR b.confidence >= ${{mc}})
+"""
+
+
+def _resolve_filters(filters: SearchFilters | None) -> tuple:
+    """Return (filters_obj, time_start, time_end) from a SearchFilters."""
+    f = filters or SearchFilters()
+    time_start = f.time_range.get("start") if f.time_range else None
+    time_end = f.time_range.get("end") if f.time_range else None
+    return f, time_start, time_end
+
+
+def _filter_params(f: SearchFilters, time_start, time_end) -> tuple:
+    """Return the common filter parameter tuple for search queries."""
+    return (
+        f.status or ["active"],
+        f.group_id, time_start, time_end,
+        f.proposition_types, f.tags,
+        f.min_confidence,
+    )
+
 
 async def vector_search(
     embedding: list[float],
@@ -432,9 +455,7 @@ async def vector_search(
     filters: SearchFilters | None = None,
 ) -> list[ScoredProposition]:
     pool = get_pool()
-    f = filters or SearchFilters()
-    time_start = f.time_range.get("start") if f.time_range else None
-    time_end = f.time_range.get("end") if f.time_range else None
+    f, time_start, time_end = _resolve_filters(filters)
     vec_str = f"[{','.join(str(v) for v in embedding)}]"
     sql = _JOINED_SELECT + """
            1 - (p.embedding <=> $1::vector) AS score
@@ -456,10 +477,7 @@ async def vector_search(
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             sql, vec_str, tenant_id, user_id,
-            f.status or ["active"],
-            f.group_id, time_start, time_end,
-            f.proposition_types, f.tags,
-            f.min_confidence,
+            *_filter_params(f, time_start, time_end),
             top_k,
         )
     return [_row_to_scored(r, "vector") for r in rows]
@@ -473,9 +491,7 @@ async def keyword_search(
     filters: SearchFilters | None = None,
 ) -> list[ScoredProposition]:
     pool = get_pool()
-    f = filters or SearchFilters()
-    time_start = f.time_range.get("start") if f.time_range else None
-    time_end = f.time_range.get("end") if f.time_range else None
+    f, time_start, time_end = _resolve_filters(filters)
     sql = _JOINED_SELECT + """
            GREATEST(
                similarity(p.canonical_text, $1),
@@ -507,10 +523,7 @@ async def keyword_search(
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             sql, query, tenant_id, user_id,
-            f.status or ["active"],
-            f.group_id, time_start, time_end,
-            f.proposition_types, f.tags,
-            f.min_confidence,
+            *_filter_params(f, time_start, time_end),
             top_k,
         )
     return [_row_to_scored(r, "keyword") for r in rows]

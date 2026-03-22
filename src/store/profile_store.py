@@ -48,6 +48,17 @@ async def get(
     return _row_to_profile(row) if row else None
 
 
+_DO_UPDATE = """
+                DO UPDATE SET
+                    profile_data = EXCLUDED.profile_data,
+                    version = profiles.version + 1,
+                    fact_count = profiles.fact_count + EXCLUDED.fact_count,
+                    last_proposition_id = EXCLUDED.last_proposition_id,
+                    updated_at = now()
+                RETURNING *
+"""
+
+
 async def upsert(
     user_id: str,
     profile_data: ProfileData,
@@ -62,35 +73,21 @@ async def upsert(
     pd_json = json.dumps(profile_data.model_dump())
     async with pool.acquire() as conn:
         if group_id is None:
-            row = await conn.fetchrow(
-                """
+            sql = """
                 INSERT INTO profiles (tenant_id, user_id, scope, group_id, profile_data, last_proposition_id, fact_count)
                 VALUES ($1, $2, $3, NULL, $4::jsonb, $5, $6)
                 ON CONFLICT (tenant_id, user_id, scope) WHERE group_id IS NULL
-                DO UPDATE SET
-                    profile_data = EXCLUDED.profile_data,
-                    version = profiles.version + 1,
-                    fact_count = profiles.fact_count + $6,
-                    last_proposition_id = EXCLUDED.last_proposition_id,
-                    updated_at = now()
-                RETURNING *
-                """,
-                tenant_id, user_id, scope, pd_json, last_proposition_id, fact_count,
+            """ + _DO_UPDATE
+            row = await conn.fetchrow(
+                sql, tenant_id, user_id, scope, pd_json, last_proposition_id, fact_count,
             )
         else:
-            row = await conn.fetchrow(
-                """
+            sql = """
                 INSERT INTO profiles (tenant_id, user_id, scope, group_id, profile_data, last_proposition_id, fact_count)
                 VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
                 ON CONFLICT (tenant_id, user_id, scope, group_id) WHERE group_id IS NOT NULL
-                DO UPDATE SET
-                    profile_data = EXCLUDED.profile_data,
-                    version = profiles.version + 1,
-                    fact_count = profiles.fact_count + $7,
-                    last_proposition_id = EXCLUDED.last_proposition_id,
-                    updated_at = now()
-                RETURNING *
-                """,
-                tenant_id, user_id, scope, group_id, pd_json, last_proposition_id, fact_count,
+            """ + _DO_UPDATE
+            row = await conn.fetchrow(
+                sql, tenant_id, user_id, scope, group_id, pd_json, last_proposition_id, fact_count,
             )
     return _row_to_profile(row)

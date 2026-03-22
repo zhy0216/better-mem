@@ -1,4 +1,5 @@
 from collections import defaultdict
+from uuid import UUID
 
 import structlog
 
@@ -7,10 +8,37 @@ from src.extract.proposition_extractor import extract_propositions
 from src.extract.profile_synthesizer import ProfileUpdateTrigger, synthesize_profile
 from src.models.proposition import Proposition
 from src.models.message import MessageBuffer
+from src.store import buffer_store
 
 logger = structlog.get_logger(__name__)
 
 _profile_trigger = ProfileUpdateTrigger()
+
+
+async def process_and_track(
+    buffers: list[MessageBuffer],
+    tenant_id: str,
+    group_id: str,
+    user_id: str = "unknown",
+) -> list[Proposition]:
+    """Full memorize lifecycle: mark_processing → extract → mark_consumed.
+
+    On failure the buffers are reset to 'pending' and the exception re-raised.
+    """
+    ids = [b.id for b in buffers]
+    await buffer_store.mark_processing(ids)
+    try:
+        saved = await process_buffered_messages(
+            buffers=buffers,
+            tenant_id=tenant_id,
+            group_id=group_id,
+            user_id=user_id,
+        )
+        await buffer_store.mark_consumed(ids)
+        return saved
+    except Exception:
+        await buffer_store.mark_pending(ids)
+        raise
 
 
 async def process_buffered_messages(
