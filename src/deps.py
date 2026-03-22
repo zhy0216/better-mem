@@ -1,5 +1,3 @@
-from fastapi import Depends
-
 from src.store.database import get_pool
 from src.store.cache import get_redis
 

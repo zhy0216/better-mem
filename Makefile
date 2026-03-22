@@ -10,7 +10,7 @@ migrate:
 	python -m src.migrations.migrate
 
 run:
-	uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
+	python -m src.cli
 
 worker:
 	python -m arq src.worker.settings.WorkerSettings
