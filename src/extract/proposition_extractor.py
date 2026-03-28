@@ -5,7 +5,6 @@ import structlog
 
 from src.extract.prompts import PROPOSITION_EXTRACTION_PROMPT
 from src.models.proposition import (
-    DECAY_RATES,
     PropositionCreate,
     get_prior,
 )

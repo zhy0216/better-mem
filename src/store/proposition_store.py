@@ -6,11 +6,9 @@ import asyncpg
 import structlog
 
 from src.models.proposition import (
-    Belief,
     Evidence,
     Proposition,
     PropositionCreate,
-    PropositionUpdate,
     ScoredProposition,
     SearchFilters,
     get_decay_rate,
@@ -307,39 +305,6 @@ async def _recompute_belief(conn, proposition_id: UUID) -> None:
     )
 
 
-async def update_belief(
-    proposition_id: UUID,
-    confidence: float | None = None,
-    utility_importance: float | None = None,
-    status: str | None = None,
-    tenant_id: str = "default",
-) -> None:
-    """Manual belief correction."""
-    pool = get_pool()
-    fields, params, idx = [], [], 1
-    if confidence is not None:
-        fields.append(f"confidence = ${idx}")
-        params.append(confidence)
-        idx += 1
-    if utility_importance is not None:
-        fields.append(f"utility_importance = ${idx}")
-        params.append(utility_importance)
-        idx += 1
-    if status is not None:
-        fields.append(f"status = ${idx}")
-        params.append(status)
-        idx += 1
-    if not fields:
-        return
-    fields.append(f"updated_at = ${idx}")
-    params.append(datetime.now(tz=timezone.utc))
-    idx += 1
-    params.append(proposition_id)
-    sql = f"UPDATE beliefs SET {', '.join(fields)} WHERE proposition_id = ${idx} RETURNING *"
-    async with pool.acquire() as conn:
-        await conn.fetchrow(sql, *params)
-
-
 # ---------------------------------------------------------------------------
 # Read operations
 # ---------------------------------------------------------------------------
@@ -416,18 +381,6 @@ _JOINED_SELECT = """
            b.confidence, b.utility_importance, b.freshness_decay,
            b.access_count, b.status,
 """
-
-_FILTER_WHERE = """
-      AND b.status = ANY(${{s}})
-      AND (${{g}}::text IS NULL OR p.group_id = ${{g}})
-      AND (${{ts}}::timestamptz IS NULL OR p.first_observed_at >= ${{ts}})
-      AND (${{te}}::timestamptz IS NULL OR p.first_observed_at <= ${{te}})
-      AND (${{pt}}::text[] IS NULL OR p.proposition_type = ANY(${{pt}}))
-      AND (${{tg}}::text[] IS NULL OR p.tags @> ${{tg}})
-      AND (p.valid_until IS NULL OR p.valid_until > now())
-      AND (${{mc}}::float IS NULL OR b.confidence >= ${{mc}})
-"""
-
 
 def _resolve_filters(filters: SearchFilters | None) -> tuple:
     """Return (filters_obj, time_start, time_end) from a SearchFilters."""
@@ -560,23 +513,6 @@ async def search_by_semantic_key(
     async with pool.acquire() as conn:
         rows = await conn.fetch(sql, tenant_id, user_id, semantic_key)
     return [_row_to_scored(r, "semantic_key") for r in rows]
-
-
-async def get_existing_semantic_keys(
-    user_id: str,
-    tenant_id: str = "default",
-) -> list[str]:
-    """Get all existing semantic keys for a user (for key normalization)."""
-    pool = get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT DISTINCT semantic_key FROM propositions
-            WHERE tenant_id = $1 AND user_id = $2 AND semantic_key IS NOT NULL
-            """,
-            tenant_id, user_id,
-        )
-    return [r["semantic_key"] for r in rows]
 
 
 # ---------------------------------------------------------------------------

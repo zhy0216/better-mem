@@ -1,6 +1,3 @@
-import hashlib
-import json
-
 import redis.asyncio as aioredis
 import structlog
 
@@ -37,29 +34,6 @@ def _profile_cache_key(tenant_id: str, user_id: str, scope: str, group_id: str |
     return f"cache:profile:{tenant_id}:{user_id}:{scope}:{gid}"
 
 
-async def get_profile_cache(
-    tenant_id: str, user_id: str, scope: str = "global", group_id: str | None = None
-) -> dict | None:
-    try:
-        r = get_redis()
-        key = _profile_cache_key(tenant_id, user_id, scope, group_id)
-        data = await r.get(key)
-        return json.loads(data) if data else None
-    except Exception:
-        return None
-
-
-async def set_profile_cache(
-    tenant_id: str, user_id: str, data: dict, scope: str = "global", group_id: str | None = None, ttl: int = 300
-) -> None:
-    try:
-        r = get_redis()
-        key = _profile_cache_key(tenant_id, user_id, scope, group_id)
-        await r.set(key, json.dumps(data), ex=ttl)
-    except Exception:
-        pass
-
-
 async def invalidate_profile_cache(
     tenant_id: str, user_id: str, scope: str = "global", group_id: str | None = None
 ) -> None:
@@ -69,49 +43,6 @@ async def invalidate_profile_cache(
         await r.delete(key)
     except Exception:
         pass
-
-
-async def get_recall_cache(query_hash: str) -> dict | None:
-    try:
-        r = get_redis()
-        key = f"cache:recall:{query_hash}"
-        data = await r.get(key)
-        return json.loads(data) if data else None
-    except Exception:
-        return None
-
-
-async def set_recall_cache(query_hash: str, data: dict, ttl: int = 120) -> None:
-    try:
-        r = get_redis()
-        key = f"cache:recall:{query_hash}"
-        await r.set(key, json.dumps(data), ex=ttl)
-    except Exception:
-        pass
-
-
-def make_recall_hash(
-    tenant_id: str,
-    user_id: str,
-    query: str,
-    filters: dict,
-    top_k: int,
-    assemble: bool,
-    include_profile: bool,
-) -> str:
-    raw = json.dumps(
-        {
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-            "query": query,
-            "filters": filters,
-            "top_k": top_k,
-            "assemble": assemble,
-            "include_profile": include_profile,
-        },
-        sort_keys=True,
-    )
-    return hashlib.sha256(raw.encode()).hexdigest()
 
 
 async def acquire_extract_lock(tenant_id: str, group_id: str, ttl: int = 120) -> bool:

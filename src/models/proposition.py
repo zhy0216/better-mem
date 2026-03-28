@@ -1,6 +1,5 @@
 from datetime import datetime
 from enum import StrEnum
-from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -12,13 +11,6 @@ class PropositionType(StrEnum):
     PLAN = "plan"
     PREFERENCE = "preference"
     RELATION = "relation"
-
-
-class BeliefStatus(StrEnum):
-    ACTIVE = "active"
-    UNCERTAIN = "uncertain"
-    STALE = "stale"
-    DEPRECATED = "deprecated"
 
 
 class EvidenceType(StrEnum):
@@ -86,12 +78,6 @@ class PropositionCreate(BaseModel):
     prior: float | None = None
 
 
-class PropositionUpdate(BaseModel):
-    canonical_text: str | None = None
-    tags: list[str] | None = None
-    metadata: dict | None = None
-
-
 # ---------------------------------------------------------------------------
 # Domain models (DB row representations)
 # ---------------------------------------------------------------------------
@@ -139,7 +125,7 @@ class Belief(BaseModel):
     access_count: int = 0
     last_accessed: datetime | None = None
 
-    status: BeliefStatus
+    status: str
 
     created_at: datetime
     updated_at: datetime
@@ -197,14 +183,6 @@ class ScoredProposition(BaseModel):
 
     score: float = 0.0
     source: str = "vector"
-
-
-class BeliefUpdateCandidate(BaseModel):
-    proposition_id: UUID
-    canonical_text: str
-    semantic_key: str | None
-    confidence: float
-    direction: EvidenceDirection = EvidenceDirection.SUPPORT
 
 
 # ---------------------------------------------------------------------------
